@@ -760,7 +760,23 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
       }
       const buf = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      const loadingTask = pdfjsLib.getDocument({ data: buf });
+      let askedOnce = false;
+      loadingTask.onPassword = (updatePassword, reason) => {
+        const message = (askedOnce || reason === 2)
+          ? "Clave incorrecta. Volvé a ingresar la clave del resumen (normalmente tu DNI):"
+          : "Este PDF tiene clave. Ingresá la clave del resumen (normalmente tu DNI):";
+        askedOnce = true;
+        const pwd = prompt(message);
+        if(pwd){
+          statusEl.textContent = "Leyendo " + file.name + "…";
+          updatePassword(pwd);
+        } else {
+          loadingTask.destroy();
+          statusEl.textContent = "Cancelado — no se ingresó la clave del PDF.";
+        }
+      };
+      const pdf = await loadingTask.promise;
       let text = "";
       for(let i=1; i<=pdf.numPages; i++){
         const page = await pdf.getPage(i);
@@ -777,7 +793,11 @@
       document.getElementById("statementText").value = text.trim();
       statusEl.textContent = "✓ " + file.name + " — revisá el texto extraído abajo";
     } catch(err){
-      statusEl.textContent = "No se pudo leer el PDF. Pegá el texto manualmente.";
+      if(err && err.name === "PasswordException"){
+        statusEl.textContent = "No se pudo abrir el PDF sin la clave correcta. Pegá el texto manualmente.";
+      } else {
+        statusEl.textContent = "No se pudo leer el PDF. Pegá el texto manualmente.";
+      }
     }
   });
 
