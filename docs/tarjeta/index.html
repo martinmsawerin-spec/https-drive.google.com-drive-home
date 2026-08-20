@@ -813,13 +813,26 @@
     return isNaN(n) ? null : Math.abs(n);
   }
 
+  // Bancos/tarjetas suelen imprimir la línea de compra de formas distintas. Se prueba
+  // cada patrón en orden y se usa el primero que coincida con la línea.
+  const STATEMENT_LINE_PATTERNS = [
+    // "04.11.24   005822   VISAUR   C.21/24   11.563,54   0,00"
+    // fecha, comprobante opcional, descripción, C.NN/NN, monto en pesos, monto en dólares opcional
+    /^\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s+(?:\d{3,8}\s+)?(.{3,80}?)\s+(?:c\.?\s*)?(\d{1,2})\s*\/\s*(\d{1,2})\s+\$?\s*(-?[\d.,]+)(?:\s+-?[\d.,]+)?\s*$/i,
+    // "NOMBRE DEL COMERCIO   03/12   $5.000,00" (sin fecha al inicio)
+    /^(.{3,80}?)\s+(?:c\.?\s*)?(\d{1,2})\s*\/\s*(\d{1,2})\s+\$?\s*(-?[\d.,]+)\s*$/i
+  ];
+
   function parseStatementText(text){
-    const LINE_RE = /^(.{3,60}?)\s+(?:c\.?\s*)?(\d{1,2})\s*\/\s*(\d{1,2})\s+\$?\s*(-?[\d.,]+)\s*$/i;
     const results = [];
     text.split("\n").forEach(rawLine => {
       const line = rawLine.trim();
       if(!line) return;
-      const m = line.match(LINE_RE);
+      let m = null;
+      for(const re of STATEMENT_LINE_PATTERNS){
+        m = line.match(re);
+        if(m) break;
+      }
       if(!m) return;
       const description = m[1].trim();
       const currentInstallment = parseInt(m[2], 10);
