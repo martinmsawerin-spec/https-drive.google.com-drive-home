@@ -79,11 +79,13 @@
   .history-header h2{font-size:.95rem;margin:0}
   .btn-csv{background:var(--card-2);border:1px solid var(--border);color:var(--text);border-radius:9px;padding:7px 12px;font-size:.78rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px}
 
+  .month-group{margin-bottom:22px}
+  .month-header{display:flex;justify-content:space-between;align-items:baseline;font-size:1rem;font-weight:700;text-transform:capitalize;padding:4px 4px 10px;margin-bottom:10px;border-bottom:1px solid var(--border)}
   .day-group{margin-bottom:14px}
   .day-header{display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);padding:0 4px 6px}
-  .day-header .net{font-variant-numeric:tabular-nums}
-  .day-header .net.positive{color:var(--accent)}
-  .day-header .net.negative{color:var(--danger)}
+  .net{font-variant-numeric:tabular-nums}
+  .net.positive{color:var(--accent)}
+  .net.negative{color:var(--danger)}
   .expense{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px}
   .expense .emoji{font-size:1.3rem;width:32px;text-align:center}
   .expense .info{flex:1;min-width:0}
@@ -481,39 +483,59 @@
       return;
     }
     const sorted = all.sort((a,b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt));
-    const groups = {};
+
+    const monthGroups = {};
     sorted.forEach(item => {
-      if(!groups[item.date]) groups[item.date] = [];
-      groups[item.date].push(item);
+      const monthKey = item.date.slice(0,7);
+      if(!monthGroups[monthKey]) monthGroups[monthKey] = [];
+      monthGroups[monthKey].push(item);
     });
 
-    Object.keys(groups).forEach(date => {
-      const dayNet = groups[date].reduce((s,item) => s + (item.kind === "ingreso" ? item.amount : -item.amount), 0);
-      const dGroup = document.createElement("div");
-      dGroup.className = "day-group";
-      const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("es", { weekday:"long", day:"numeric", month:"short" });
-      dGroup.innerHTML = `<div class="day-header"><span>${dateLabel}</span><span class="net ${dayNet >= 0 ? "positive" : "negative"}">${fmt(dayNet)}</span></div>`;
+    Object.keys(monthGroups).forEach(monthKey => {
+      const monthItems = monthGroups[monthKey];
+      const monthNet = monthItems.reduce((s,item) => s + (item.kind === "ingreso" ? item.amount : -item.amount), 0);
+      const monthLabel = new Date(monthKey + "-01T00:00:00").toLocaleDateString("es", { month:"long", year:"numeric" });
 
-      groups[date].forEach(item => {
-        const isIncome = item.kind === "ingreso";
-        const meta = isIncome ? sourceById(item.source) : catById(item.category);
-        const row = document.createElement("div");
-        row.className = "expense";
-        row.innerHTML = `
-          <div class="emoji">${meta.emoji}</div>
-          <div class="info">
-            <div class="cat-name">${meta.name}</div>
-            ${item.note ? `<div class="note">${escapeHtml(item.note)}</div>` : ""}
-          </div>
-          <div class="amt ${isIncome ? "income-amt" : "expense-amt"}">${isIncome ? "+" : "-"}${fmt(item.amount)}</div>
-          <div class="actions">
-            <button class="icon-btn edit" data-id="${item.id}" data-kind="${item.kind}" aria-label="Editar">✏️</button>
-            <button class="icon-btn del" data-id="${item.id}" data-kind="${item.kind}" aria-label="Eliminar">🗑️</button>
-          </div>
-        `;
-        dGroup.appendChild(row);
+      const monthSection = document.createElement("div");
+      monthSection.className = "month-group";
+      monthSection.innerHTML = `<div class="month-header"><span>${monthLabel}</span><span class="net ${monthNet >= 0 ? "positive" : "negative"}">${fmt(monthNet)}</span></div>`;
+
+      const dayGroups = {};
+      monthItems.forEach(item => {
+        if(!dayGroups[item.date]) dayGroups[item.date] = [];
+        dayGroups[item.date].push(item);
       });
-      list.appendChild(dGroup);
+
+      Object.keys(dayGroups).forEach(date => {
+        const dayNet = dayGroups[date].reduce((s,item) => s + (item.kind === "ingreso" ? item.amount : -item.amount), 0);
+        const dGroup = document.createElement("div");
+        dGroup.className = "day-group";
+        const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("es", { weekday:"long", day:"numeric", month:"short" });
+        dGroup.innerHTML = `<div class="day-header"><span>${dateLabel}</span><span class="net ${dayNet >= 0 ? "positive" : "negative"}">${fmt(dayNet)}</span></div>`;
+
+        dayGroups[date].forEach(item => {
+          const isIncome = item.kind === "ingreso";
+          const meta = isIncome ? sourceById(item.source) : catById(item.category);
+          const row = document.createElement("div");
+          row.className = "expense";
+          row.innerHTML = `
+            <div class="emoji">${meta.emoji}</div>
+            <div class="info">
+              <div class="cat-name">${meta.name}</div>
+              ${item.note ? `<div class="note">${escapeHtml(item.note)}</div>` : ""}
+            </div>
+            <div class="amt ${isIncome ? "income-amt" : "expense-amt"}">${isIncome ? "+" : "-"}${fmt(item.amount)}</div>
+            <div class="actions">
+              <button class="icon-btn edit" data-id="${item.id}" data-kind="${item.kind}" aria-label="Editar">✏️</button>
+              <button class="icon-btn del" data-id="${item.id}" data-kind="${item.kind}" aria-label="Eliminar">🗑️</button>
+            </div>
+          `;
+          dGroup.appendChild(row);
+        });
+        monthSection.appendChild(dGroup);
+      });
+
+      list.appendChild(monthSection);
     });
 
     list.querySelectorAll(".edit").forEach(btn => {
