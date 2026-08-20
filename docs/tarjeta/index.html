@@ -283,6 +283,7 @@
 
         <label class="field-label">Mes del resumen</label>
         <input type="month" class="field" id="statementMonth">
+        <div class="hint" id="dateDetectHint" style="display:none"></div>
 
         <label class="field-label">Subí el PDF o pegá el texto del resumen</label>
         <div class="upload-row">
@@ -845,11 +846,49 @@
     return results;
   }
 
+  // ---------- Closing date detection (auto-fill "Mes del resumen" + card's closing day) ----------
+  const MONTH_ABBR = {
+    ene:1, feb:2, mar:3, abr:4, may:5, jun:6, jul:7,
+    ago:8, sep:9, set:9, oct:10, nov:11, dic:12
+  };
+  function parseClosingDateFromText(text){
+    const m = text.match(/CIERRE\s+ACTUAL:?\s*(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3,})\.?\s+(\d{2,4})/i);
+    if(!m) return null;
+    const day = parseInt(m[1], 10);
+    const monthKey = m[2].slice(0,3).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+    const month = MONTH_ABBR[monthKey];
+    if(!month || day < 1 || day > 31) return null;
+    let year = parseInt(m[3], 10);
+    if(year < 100) year += 2000;
+    return { day, month, year };
+  }
+
   document.getElementById("analyzeBtn").addEventListener("click", () => {
     const text = document.getElementById("statementText").value;
     const found = parseStatementText(text);
     previewRows = found.map(r => ({ ...r, _id: uid() }));
     renderPreview();
+
+    const hint = document.getElementById("dateDetectHint");
+    const closing = parseClosingDateFromText(text);
+    if(closing){
+      const closingMonthStr = closing.year + "-" + String(closing.month).padStart(2,"0");
+      const statementMonth = addMonths(closingMonthStr, 1);
+      document.getElementById("statementMonth").value = statementMonth;
+      let msg = `Detecté cierre el día ${closing.day} de ${monthLabel(closingMonthStr)} → mes de resumen: ${monthLabel(statementMonth)}.`;
+      const card = cardById(selectedCardImport);
+      if(card){
+        card.closingDay = closing.day;
+        saveCards();
+        refreshAllCardGrids();
+        renderCardsTab();
+        msg += ` Actualicé el día de cierre de "${card.name}" a ${closing.day}.`;
+      }
+      hint.textContent = msg;
+      hint.style.display = "block";
+    } else {
+      hint.style.display = "none";
+    }
   });
 
   function renderPreview(){
