@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<meta name="theme-color" content="#0f172a">
+<title>Mis Gastos</title>
+<style>
+  :root{
+    --bg:#0f172a;
+    --card:#1a2540;
+    --card-2:#22304f;
+    --text:#f1f5f9;
+    --muted:#94a3b8;
+    --accent:#22c55e;
+    --danger:#f87171;
+    --border:#2a3a5c;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;padding-bottom:90px}
+  header{padding:20px 16px 8px;text-align:center}
+  header h1{margin:0;font-size:1.4rem}
+  header p{margin:4px 0 0;color:var(--muted);font-size:.85rem}
+
+  .container{max-width:520px;margin:0 auto;padding:0 16px}
+
+  .summary{display:flex;gap:10px;margin:16px 0}
+  .summary .box{flex:1;background:var(--card);border-radius:var(--radius);padding:12px;text-align:center}
+  .summary .box .label{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .summary .box .value{font-size:1.25rem;font-weight:700;margin-top:2px}
+
+  .tabs{display:flex;background:var(--card);border-radius:12px;padding:4px;margin-bottom:14px}
+  .tabs button{flex:1;padding:8px;border:none;background:transparent;color:var(--muted);border-radius:9px;font-size:.85rem;font-weight:600;cursor:pointer}
+  .tabs button.active{background:var(--accent);color:#04140a}
+
+  .view{display:none}
+  .view.active{display:block}
+
+  form.entry{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  .amount-row{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .amount-row span{font-size:1.6rem;color:var(--muted)}
+  input#amount{flex:1;background:transparent;border:none;color:var(--text);font-size:2rem;font-weight:700;outline:none;min-width:0}
+  input#amount::placeholder{color:#3d4d70}
+
+  .cat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+  .cat-btn{display:flex;flex-direction:column;align-items:center;gap:4px;background:var(--card-2);border:2px solid transparent;border-radius:12px;padding:10px 4px;cursor:pointer;color:var(--text)}
+  .cat-btn .emoji{font-size:1.3rem}
+  .cat-btn .name{font-size:.65rem;color:var(--muted);text-align:center;line-height:1.1}
+  .cat-btn.selected{border-color:var(--accent);background:#16321f}
+  .cat-btn.selected .name{color:var(--accent)}
+
+  input#note{width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:.9rem;margin-bottom:10px;outline:none}
+  input#note::placeholder{color:var(--muted)}
+  input#date{width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:.9rem;margin-bottom:14px;outline:none;color-scheme:dark}
+
+  button.save{width:100%;padding:14px;background:var(--accent);border:none;border-radius:12px;color:#04140a;font-size:1rem;font-weight:700;cursor:pointer}
+  button.save:active{transform:scale(.99)}
+
+  .section-title{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
+
+  .day-group{margin-bottom:14px}
+  .day-header{display:flex;justify-content:space-between;font-size:.78rem;color:var(--muted);padding:0 4px 6px}
+  .expense{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  .expense .emoji{font-size:1.3rem;width:32px;text-align:center}
+  .expense .info{flex:1;min-width:0}
+  .expense .cat-name{font-size:.85rem;font-weight:600}
+  .expense .note{font-size:.75rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .expense .amt{font-weight:700}
+  .expense button.del{background:none;border:none;color:var(--danger);font-size:1.1rem;padding:4px 6px;cursor:pointer}
+
+  .empty{text-align:center;color:var(--muted);padding:40px 10px;font-size:.9rem}
+
+  .month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .month-nav button{background:var(--card-2);border:none;color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:1rem}
+  .month-nav .label{font-weight:700;text-transform:capitalize}
+
+  .cat-summary{background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+  .cat-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .cat-row:last-child{margin-bottom:0}
+  .cat-row .emoji{font-size:1.2rem;width:26px;text-align:center}
+  .cat-row .name{font-size:.85rem;width:90px;flex-shrink:0}
+  .cat-row .bar-wrap{flex:1;background:var(--card-2);border-radius:6px;height:10px;overflow:hidden}
+  .cat-row .bar{height:100%;border-radius:6px}
+  .cat-row .amt{font-size:.8rem;color:var(--muted);width:70px;text-align:right;flex-shrink:0}
+
+  ::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>💸 Mis Gastos</h1>
+  <p>Registra y clasifica tus gastos diarios</p>
+</header>
+
+<div class="container">
+  <div class="summary">
+    <div class="box">
+      <div class="label">Hoy</div>
+      <div class="value" id="sumToday">$0</div>
+    </div>
+    <div class="box">
+      <div class="label">Este mes</div>
+      <div class="value" id="sumMonth">$0</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="active" data-tab="add">➕ Agregar</button>
+    <button data-tab="history">📋 Historial</button>
+    <button data-tab="stats">📊 Categorías</button>
+  </div>
+
+  <!-- ADD VIEW -->
+  <div class="view active" id="view-add">
+    <form class="entry" id="entryForm">
+      <div class="amount-row">
+        <span id="currencySymbol">$</span>
+        <input type="number" id="amount" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required>
+      </div>
+
+      <div class="cat-grid" id="catGrid"></div>
+
+      <input type="text" id="note" placeholder="Descripción (opcional)" maxlength="60">
+      <input type="date" id="date" required>
+
+      <button type="submit" class="save">Guardar gasto</button>
+    </form>
+  </div>
+
+  <!-- HISTORY VIEW -->
+  <div class="view" id="view-history">
+    <div id="historyList"></div>
+  </div>
+
+  <!-- STATS VIEW -->
+  <div class="view" id="view-stats">
+    <div class="month-nav">
+      <button id="prevMonth">‹</button>
+      <div class="label" id="statsMonthLabel"></div>
+      <button id="nextMonth">›</button>
+    </div>
+    <div class="cat-summary" id="catSummary"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const CATEGORIES = [
+    { id:"alimentacion", name:"Comida",       emoji:"🍔", color:"#f97316" },
+    { id:"transporte",   name:"Transporte",   emoji:"🚌", color:"#38bdf8" },
+    { id:"vivienda",     name:"Vivienda",     emoji:"🏠", color:"#a78bfa" },
+    { id:"salud",        name:"Salud",        emoji:"💊", color:"#f87171" },
+    { id:"ocio",         name:"Ocio",         emoji:"🎬", color:"#facc15" },
+    { id:"compras",      name:"Compras",      emoji:"🛍️", color:"#f472b6" },
+    { id:"educacion",    name:"Educación",    emoji:"📚", color:"#4ade80" },
+    { id:"otros",        name:"Otros",        emoji:"🔖", color:"#94a3b8" }
+  ];
+
+  const STORAGE_KEY = "expenses_v1";
+  const CURRENCY_KEY = "currency_symbol_v1";
+
+  function loadExpenses(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    }catch(e){ return []; }
+  }
+  function saveExpenses(list){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  }
+
+  let expenses = loadExpenses();
+  let selectedCategory = CATEGORIES[0].id;
+  let statsMonthOffset = 0; // 0 = current month
+
+  const currencySymbol = localStorage.getItem(CURRENCY_KEY) || "$";
+  document.getElementById("currencySymbol").textContent = currencySymbol;
+
+  function fmt(n){
+    return currencySymbol + Number(n).toLocaleString("es", {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function catById(id){
+    return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1];
+  }
+  function todayStr(){
+    const d = new Date();
+    return d.toISOString().slice(0,10);
+  }
+
+  // ---------- Category grid (add form) ----------
+  const catGrid = document.getElementById("catGrid");
+  CATEGORIES.forEach(cat => {
+    const btn = document.createElement("div");
+    btn.className = "cat-btn" + (cat.id === selectedCategory ? " selected" : "");
+    btn.dataset.cat = cat.id;
+    btn.innerHTML = `<span class="emoji">${cat.emoji}</span><span class="name">${cat.name}</span>`;
+    btn.addEventListener("click", () => {
+      selectedCategory = cat.id;
+      document.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+    });
+    catGrid.appendChild(btn);
+  });
+
+  document.getElementById("date").value = todayStr();
+
+  // ---------- Tabs ----------
+  document.querySelectorAll(".tabs button").forEach(tabBtn => {
+    tabBtn.addEventListener("click", () => {
+      document.querySelectorAll(".tabs button").forEach(b => b.classList.remove("active"));
+      tabBtn.classList.add("active");
+      document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+      document.getElementById("view-" + tabBtn.dataset.tab).classList.add("active");
+      if(tabBtn.dataset.tab === "history") renderHistory();
+      if(tabBtn.dataset.tab === "stats") renderStats();
+    });
+  });
+
+  // ---------- Form submit ----------
+  document.getElementById("entryForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    const amountInput = document.getElementById("amount");
+    const amount = parseFloat(amountInput.value);
+    if(!amount || amount <= 0) return;
+    const note = document.getElementById("note").value.trim();
+    const date = document.getElementById("date").value || todayStr();
+
+    expenses.push({
+      id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
+      amount, category: selectedCategory, note, date,
+      createdAt: new Date().toISOString()
+    });
+    saveExpenses(expenses);
+
+    amountInput.value = "";
+    document.getElementById("note").value = "";
+    amountInput.focus();
+
+    renderSummary();
+  });
+
+  // ---------- Summary (today / month) ----------
+  function renderSummary(){
+    const today = todayStr();
+    const monthKey = today.slice(0,7);
+    let sumToday = 0, sumMonth = 0;
+    expenses.forEach(ex => {
+      if(ex.date === today) sumToday += ex.amount;
+      if(ex.date.slice(0,7) === monthKey) sumMonth += ex.amount;
+    });
+    document.getElementById("sumToday").textContent = fmt(sumToday);
+    document.getElementById("sumMonth").textContent = fmt(sumMonth);
+  }
+
+  // ---------- History ----------
+  function renderHistory(){
+    const list = document.getElementById("historyList");
+    list.innerHTML = "";
+    if(expenses.length === 0){
+      list.innerHTML = '<div class="empty">Aún no has registrado gastos.<br>Agrega el primero desde la pestaña "Agregar".</div>';
+      return;
+    }
+    const sorted = [...expenses].sort((a,b) => (b.date + b.createdAt).localeCompare(a.date + a.createdAt));
+    const groups = {};
+    sorted.forEach(ex => {
+      if(!groups[ex.date]) groups[ex.date] = [];
+      groups[ex.date].push(ex);
+    });
+
+    Object.keys(groups).forEach(date => {
+      const dayTotal = groups[date].reduce((s,e) => s + e.amount, 0);
+      const dGroup = document.createElement("div");
+      dGroup.className = "day-group";
+      const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("es", { weekday:"long", day:"numeric", month:"short" });
+      dGroup.innerHTML = `<div class="day-header"><span>${dateLabel}</span><span>${fmt(dayTotal)}</span></div>`;
+
+      groups[date].forEach(ex => {
+        const cat = catById(ex.category);
+        const row = document.createElement("div");
+        row.className = "expense";
+        row.innerHTML = `
+          <div class="emoji">${cat.emoji}</div>
+          <div class="info">
+            <div class="cat-name">${cat.name}</div>
+            ${ex.note ? `<div class="note">${escapeHtml(ex.note)}</div>` : ""}
+          </div>
+          <div class="amt">${fmt(ex.amount)}</div>
+          <button class="del" data-id="${ex.id}" aria-label="Eliminar">🗑️</button>
+        `;
+        dGroup.appendChild(row);
+      });
+      list.appendChild(dGroup);
+    });
+
+    list.querySelectorAll(".del").forEach(btn => {
+      btn.addEventListener("click", () => {
+        expenses = expenses.filter(e => e.id !== btn.dataset.id);
+        saveExpenses(expenses);
+        renderHistory();
+        renderSummary();
+      });
+    });
+  }
+
+  function escapeHtml(s){
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ---------- Stats by category ----------
+  function currentStatsMonth(){
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + statsMonthOffset);
+    return d;
+  }
+
+  document.getElementById("prevMonth").addEventListener("click", () => {
+    statsMonthOffset -= 1;
+    renderStats();
+  });
+  document.getElementById("nextMonth").addEventListener("click", () => {
+    statsMonthOffset = Math.min(0, statsMonthOffset + 1);
+    renderStats();
+  });
+
+  function renderStats(){
+    const monthDate = currentStatsMonth();
+    const monthKey = monthDate.toISOString().slice(0,7);
+    document.getElementById("statsMonthLabel").textContent =
+      monthDate.toLocaleDateString("es", { month:"long", year:"numeric" });
+    document.getElementById("nextMonth").disabled = statsMonthOffset >= 0;
+    document.getElementById("nextMonth").style.opacity = statsMonthOffset >= 0 ? .4 : 1;
+
+    const totals = {};
+    let grandTotal = 0;
+    expenses.filter(e => e.date.slice(0,7) === monthKey).forEach(e => {
+      totals[e.category] = (totals[e.category] || 0) + e.amount;
+      grandTotal += e.amount;
+    });
+
+    const box = document.getElementById("catSummary");
+    box.innerHTML = "";
+
+    if(grandTotal === 0){
+      box.innerHTML = '<div class="empty">Sin gastos registrados en este mes.</div>';
+      return;
+    }
+
+    const sortedCats = CATEGORIES
+      .map(c => ({ ...c, total: totals[c.id] || 0 }))
+      .filter(c => c.total > 0)
+      .sort((a,b) => b.total - a.total);
+
+    sortedCats.forEach(c => {
+      const pct = (c.total / grandTotal) * 100;
+      const row = document.createElement("div");
+      row.className = "cat-row";
+      row.innerHTML = `
+        <div class="emoji">${c.emoji}</div>
+        <div class="name">${c.name}</div>
+        <div class="bar-wrap"><div class="bar" style="width:${pct}%;background:${c.color}"></div></div>
+        <div class="amt">${fmt(c.total)}</div>
+      `;
+      box.appendChild(row);
+    });
+  }
+
+  // ---------- Init ----------
+  renderSummary();
+})();
+</script>
+</body>
+</html>
