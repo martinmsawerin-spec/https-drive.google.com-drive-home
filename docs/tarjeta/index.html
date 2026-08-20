@@ -126,6 +126,11 @@
 
   .cards-list .purchase-card{align-items:center}
   .cards-list .card-name-input{flex:1;background:transparent;border:none;color:var(--text);font-size:.9rem;font-weight:600;outline:none}
+  .closing-day-row{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .closing-day-row label{font-size:.72rem;color:var(--muted)}
+  .closing-day-row input{width:46px;background:var(--card-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:3px 5px;text-align:center}
+
+  .new-purchase-hint{background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:-2px 0 14px;font-size:.8rem;color:var(--accent);line-height:1.4}
 
   ::-webkit-scrollbar{display:none}
 </style>
@@ -163,7 +168,8 @@
   <!-- ADD VIEW -->
   <div class="view active" id="view-add">
     <div class="subtabs">
-      <button class="active" data-mode="manual">✍️ Manual</button>
+      <button class="active" data-mode="new">🛒 Compra nueva</button>
+      <button data-mode="manual">🧾 Cuota desde resumen</button>
       <button data-mode="import">📄 Importar resumen</button>
     </div>
 
@@ -172,8 +178,40 @@
       <span>✏️</span>
     </div>
 
-    <!-- MANUAL FORM -->
-    <div class="form-mode active" id="mode-manual">
+    <!-- NEW PURCHASE FORM (compra hecha durante el mes, antes del cierre) -->
+    <div class="form-mode active" id="mode-new">
+      <div class="panel">
+        <form id="newPurchaseForm">
+          <label class="field-label">Tarjeta</label>
+          <div class="card-grid" id="cardGridNew"></div>
+          <div id="newCardFormNew"></div>
+
+          <label class="field-label">Descripción</label>
+          <input type="text" class="field" id="nDescription" placeholder="Ej: Zapatillas, Notebook..." maxlength="60" required>
+
+          <label class="field-label">Fecha de la compra</label>
+          <input type="date" class="field" id="nDate" required>
+
+          <div class="field-row">
+            <div>
+              <label class="field-label">Monto total de la compra</label>
+              <input type="number" class="field" id="nTotalAmount" inputmode="decimal" step="0.01" min="0" placeholder="0.00" required>
+            </div>
+            <div>
+              <label class="field-label">Cantidad de cuotas</label>
+              <input type="number" class="field" id="nTotalInstallments" inputmode="numeric" min="1" max="60" value="1" required>
+            </div>
+          </div>
+
+          <div class="new-purchase-hint" id="newPurchaseHint"></div>
+
+          <button type="submit" class="save" id="newPurchaseSubmitBtn">Guardar compra</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- MANUAL FORM (cargar una cuota ya en curso, tal como figura en un resumen) -->
+    <div class="form-mode" id="mode-manual">
       <div class="panel">
         <form id="manualForm">
           <label class="field-label">Tarjeta</label>
@@ -258,6 +296,9 @@
     <div class="panel">
       <label class="field-label">Agregar tarjeta</label>
       <input type="text" class="field" id="newCardName" placeholder="Ej: Visa Galicia" maxlength="30">
+      <label class="field-label">Día de cierre (opcional)</label>
+      <input type="number" class="field" id="newCardClosingDay" min="1" max="31" placeholder="Ej: 15">
+      <div class="hint">Si lo cargás, las compras nuevas que hagas después de ese día del mes se van a proyectar a partir del resumen siguiente.</div>
       <div class="color-grid" id="colorGridStandalone"></div>
       <button type="button" class="save" id="addCardBtn">Agregar tarjeta</button>
     </div>
@@ -286,6 +327,7 @@
 
   let cards = loadList(CARDS_KEY);
   let purchases = loadList(PURCHASES_KEY);
+  let selectedCardNew = cards[0] ? cards[0].id : null;
   let selectedCardManual = cards[0] ? cards[0].id : null;
   let selectedCardImport = cards[0] ? cards[0].id : null;
   let editingPurchaseId = null;
@@ -322,6 +364,20 @@
     if(n < 1 || n > purchase.totalInstallments) return null;
     return n;
   }
+  function purchaseStatus(purchase, monthStr){
+    const n = monthDiff(purchase.firstInstallmentMonth, monthStr) + 1;
+    if(n < 1) return { state:"upcoming", n:null };
+    if(n > purchase.totalInstallments) return { state:"finished", n:null };
+    return { state:"active", n };
+  }
+  function computeFirstStatementMonth(dateStr, closingDay){
+    const d = new Date(dateStr + "T00:00:00");
+    let month = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
+    if(closingDay && d.getDate() > closingDay){
+      month = addMonths(month, 1);
+    }
+    return month;
+  }
   function escapeHtml(s){
     const d = document.createElement("div");
     d.textContent = s == null ? "" : s;
@@ -350,6 +406,7 @@
     container.innerHTML = `
       <div class="new-card-form open">
         <input type="text" class="field" id="inlineCardName" placeholder="Nombre de la tarjeta" maxlength="30">
+        <input type="number" class="field" id="inlineCardClosingDay" min="1" max="31" placeholder="Día de cierre (opcional)">
         <div class="color-grid" id="inlineColorGrid"></div>
         <div class="new-card-actions">
           <button type="button" class="cancel">Cancelar</button>
@@ -373,20 +430,29 @@
     container.querySelector(".confirm").addEventListener("click", () => {
       const name = container.querySelector("#inlineCardName").value.trim();
       if(!name) return;
-      const newCard = { id: uid(), name, color: chosenColor };
+      const closingDayRaw = parseInt(container.querySelector("#inlineCardClosingDay").value, 10);
+      const closingDay = (closingDayRaw >= 1 && closingDayRaw <= 31) ? closingDayRaw : null;
+      const newCard = { id: uid(), name, color: chosenColor, closingDay };
       cards.push(newCard);
       saveCards();
       container.innerHTML = "";
       onSelect(newCard.id);
+      if(!selectedCardNew) selectedCardNew = newCard.id;
       if(!selectedCardManual) selectedCardManual = newCard.id;
       if(!selectedCardImport) selectedCardImport = newCard.id;
       refreshAllCardGrids();
       renderCardsTab();
       renderFilters();
+      updateNewPurchaseHint();
     });
   }
 
   function refreshAllCardGrids(){
+    renderCardGrid(document.getElementById("cardGridNew"), selectedCardNew, id => {
+      selectedCardNew = id;
+      refreshAllCardGrids();
+      updateNewPurchaseHint();
+    }, document.getElementById("newCardFormNew"));
     renderCardGrid(document.getElementById("cardGridManual"), selectedCardManual, id => {
       selectedCardManual = id;
       refreshAllCardGrids();
@@ -415,15 +481,21 @@
     const nameInput = document.getElementById("newCardName");
     const name = nameInput.value.trim();
     if(!name) return;
-    const newCard = { id: uid(), name, color: standaloneColor };
+    const closingDayInput = document.getElementById("newCardClosingDay");
+    const closingDayRaw = parseInt(closingDayInput.value, 10);
+    const closingDay = (closingDayRaw >= 1 && closingDayRaw <= 31) ? closingDayRaw : null;
+    const newCard = { id: uid(), name, color: standaloneColor, closingDay };
     cards.push(newCard);
     saveCards();
     nameInput.value = "";
+    closingDayInput.value = "";
+    if(!selectedCardNew) selectedCardNew = newCard.id;
     if(!selectedCardManual) selectedCardManual = newCard.id;
     if(!selectedCardImport) selectedCardImport = newCard.id;
     refreshAllCardGrids();
     renderCardsTab();
     renderFilters();
+    updateNewPurchaseHint();
   });
 
   function renderCardsTab(){
@@ -442,12 +514,27 @@
         <div class="info">
           <div class="desc">${escapeHtml(card.name)}</div>
           <div class="meta">${purchaseCount} compra${purchaseCount === 1 ? "" : "s"} cargada${purchaseCount === 1 ? "" : "s"}</div>
+          <div class="closing-day-row">
+            <label for="closing-${card.id}">Día de cierre</label>
+            <input type="number" id="closing-${card.id}" min="1" max="31" value="${card.closingDay || ""}" placeholder="—" data-id="${card.id}">
+          </div>
         </div>
         <div class="actions">
           <button class="icon-btn del" data-id="${card.id}" aria-label="Eliminar tarjeta">🗑️</button>
         </div>
       `;
       list.appendChild(row);
+    });
+    list.querySelectorAll(".closing-day-row input").forEach(input => {
+      input.addEventListener("change", () => {
+        const card = cardById(input.dataset.id);
+        if(!card) return;
+        const raw = parseInt(input.value, 10);
+        card.closingDay = (raw >= 1 && raw <= 31) ? raw : null;
+        input.value = card.closingDay || "";
+        saveCards();
+        updateNewPurchaseHint();
+      });
     });
     list.querySelectorAll(".del").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -458,6 +545,7 @@
         cards = cards.filter(c => c.id !== id);
         savePurchases();
         saveCards();
+        if(selectedCardNew === id) selectedCardNew = cards[0] ? cards[0].id : null;
         if(selectedCardManual === id) selectedCardManual = cards[0] ? cards[0].id : null;
         if(selectedCardImport === id) selectedCardImport = cards[0] ? cards[0].id : null;
         refreshAllCardGrids();
@@ -466,11 +554,17 @@
         renderPurchases();
         renderProjection();
         renderSummary();
+        updateNewPurchaseHint();
       });
     });
   }
 
   // ---------- Init default dates ----------
+  function todayDateStr(){
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  document.getElementById("nDate").value = todayDateStr();
   document.getElementById("mStatementMonth").value = todayMonthStr();
   document.getElementById("statementMonth").value = todayMonthStr();
   refreshAllCardGrids();
@@ -491,6 +585,7 @@
 
   function setMode(mode){
     document.querySelectorAll(".subtabs button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+    document.getElementById("mode-new").classList.toggle("active", mode === "new");
     document.getElementById("mode-manual").classList.toggle("active", mode === "manual");
     document.getElementById("mode-import").classList.toggle("active", mode === "import");
   }
@@ -572,6 +667,60 @@
       document.getElementById("mTotalInstallments").value = 1;
       document.getElementById("mCurrentInstallment").value = 1;
     }
+    renderSummary();
+    renderFilters();
+  });
+
+  // ---------- New purchase (compra hecha durante el mes) ----------
+  function updateNewPurchaseHint(){
+    const hint = document.getElementById("newPurchaseHint");
+    const totalAmount = parseFloat(document.getElementById("nTotalAmount").value);
+    const totalInstallments = parseInt(document.getElementById("nTotalInstallments").value, 10);
+    const date = document.getElementById("nDate").value;
+    const card = cardById(selectedCardNew);
+
+    if(!date || !totalAmount || totalAmount <= 0 || !totalInstallments || totalInstallments < 1){
+      hint.textContent = "Completá el monto, las cuotas y la fecha para ver en qué resumen va a aparecer.";
+      return;
+    }
+    const perInstallment = totalAmount / totalInstallments;
+    const firstMonth = computeFirstStatementMonth(date, card ? card.closingDay : null);
+    let text = `Cada cuota: ${fmt(perInstallment)} · Primera cuota en el resumen de ${monthLabel(firstMonth)}.`;
+    if(!card || !card.closingDay){
+      text += " (Sin día de cierre configurado para esta tarjeta — asumimos que cae en el mes de la compra. Podés configurarlo en la pestaña Tarjetas.)";
+    }
+    hint.textContent = text;
+  }
+  ["nTotalAmount","nTotalInstallments","nDate"].forEach(id => {
+    document.getElementById(id).addEventListener("input", updateNewPurchaseHint);
+  });
+  updateNewPurchaseHint();
+
+  document.getElementById("newPurchaseForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    if(!selectedCardNew){ alert("Agregá o elegí una tarjeta primero."); return; }
+    const description = document.getElementById("nDescription").value.trim();
+    const date = document.getElementById("nDate").value;
+    const totalAmount = parseFloat(document.getElementById("nTotalAmount").value);
+    const totalInstallments = parseInt(document.getElementById("nTotalInstallments").value, 10);
+    if(!description || !date || !totalAmount || totalAmount <= 0 || !totalInstallments || totalInstallments < 1) return;
+
+    const card = cardById(selectedCardNew);
+    const installmentAmount = Math.round((totalAmount / totalInstallments) * 100) / 100;
+    const firstInstallmentMonth = computeFirstStatementMonth(date, card ? card.closingDay : null);
+
+    purchases.push({
+      id: uid(), cardId: selectedCardNew, description, installmentAmount,
+      totalInstallments, firstInstallmentMonth, createdAt: new Date().toISOString()
+    });
+    savePurchases();
+
+    document.getElementById("nDescription").value = "";
+    document.getElementById("nTotalAmount").value = "";
+    document.getElementById("nTotalInstallments").value = 1;
+    document.getElementById("nDate").value = todayDateStr();
+    document.getElementById("nDescription").focus();
+    updateNewPurchaseHint();
     renderSummary();
     renderFilters();
   });
@@ -752,25 +901,25 @@
       list.innerHTML = '<div class="empty">No hay compras cargadas todavía.<br>Agregá una desde la pestaña "Agregar".</div>';
       return;
     }
+    const STATE_RANK = { active:0, upcoming:1, finished:2 };
     items = items.slice().sort((a,b) => {
-      const na = installmentNumberForMonth(a, currentMonth);
-      const nb = installmentNumberForMonth(b, currentMonth);
-      const aFinished = na === null;
-      const bFinished = nb === null;
-      if(aFinished !== bFinished) return aFinished ? 1 : -1;
+      const ra = STATE_RANK[purchaseStatus(a, currentMonth).state];
+      const rb = STATE_RANK[purchaseStatus(b, currentMonth).state];
+      if(ra !== rb) return ra - rb;
       return (b.createdAt || "").localeCompare(a.createdAt || "");
     });
 
     list.innerHTML = "";
     items.forEach(p => {
       const card = cardById(p.cardId);
-      const n = installmentNumberForMonth(p, currentMonth);
-      const finished = n === null;
+      const status = purchaseStatus(p, currentMonth);
+      const finished = status.state === "finished";
       const row = document.createElement("div");
       row.className = "purchase-card" + (finished ? " finished" : "");
-      const statusText = finished
-        ? "Finalizada"
-        : `Cuota ${n}/${p.totalInstallments}`;
+      let statusText;
+      if(status.state === "active") statusText = `Cuota ${status.n}/${p.totalInstallments}`;
+      else if(status.state === "upcoming") statusText = `Empieza en ${monthLabel(p.firstInstallmentMonth)}`;
+      else statusText = "Finalizada";
       row.innerHTML = `
         <span class="dot" style="background:${card ? card.color : "#999"}"></span>
         <div class="info">
