@@ -195,6 +195,9 @@
 
         <div class="cat-grid" id="catGrid"></div>
 
+        <label class="field-label" style="display:block;font-size:.75rem;color:var(--muted);margin-bottom:6px;font-weight:600">Método de pago</label>
+        <div class="source-grid" id="methodGrid"></div>
+
         <input type="text" class="field" id="noteExpense" placeholder="Descripción (opcional)" maxlength="60">
         <input type="date" class="field" id="dateExpense" required>
 
@@ -240,6 +243,8 @@
     </div>
     <div class="section-title">Gastos por categoría</div>
     <div class="cat-summary" id="catSummary"></div>
+    <div class="section-title">Gastos por método de pago</div>
+    <div class="cat-summary" id="methodSummary"></div>
     <div class="section-title">Ingresos por fuente</div>
     <div class="cat-summary" id="sourceSummary"></div>
   </div>
@@ -266,6 +271,11 @@
     { id:"efectivo", name:"Efectivo", emoji:"💵", color:"#4ade80" }
   ];
 
+  const PAYMENT_METHODS = [
+    { id:"efectivo",      name:"Efectivo",         emoji:"💵", color:"#4ade80" },
+    { id:"transferencia", name:"Transferencia/MP", emoji:"📲", color:"#3b82f6" }
+  ];
+
   const EXPENSES_KEY = "expenses_v1";
   const INCOMES_KEY = "incomes_v1";
   const CURRENCY_KEY = "currency_symbol_v1";
@@ -283,6 +293,7 @@
   let incomes = loadList(INCOMES_KEY);
   let selectedCategory = CATEGORIES[0].id;
   let selectedSource = SOURCES[0].id;
+  let selectedMethod = PAYMENT_METHODS[0].id;
   let statsMonthOffset = 0; // 0 = current month
   let editing = null; // { type:'gasto'|'ingreso', id }
 
@@ -299,6 +310,9 @@
   }
   function sourceById(id){
     return SOURCES.find(s => s.id === id) || SOURCES[0];
+  }
+  function methodById(id){
+    return PAYMENT_METHODS.find(m => m.id === id) || PAYMENT_METHODS[0];
   }
   function todayStr(){
     const d = new Date();
@@ -332,6 +346,20 @@
       btn.classList.add("selected");
     });
     sourceGrid.appendChild(btn);
+  });
+
+  const methodGrid = document.getElementById("methodGrid");
+  PAYMENT_METHODS.forEach(method => {
+    const btn = document.createElement("div");
+    btn.className = "cat-btn" + (method.id === selectedMethod ? " selected" : "");
+    btn.dataset.method = method.id;
+    btn.innerHTML = `<span class="emoji">${method.emoji}</span><span class="name">${method.name}</span>`;
+    btn.addEventListener("click", () => {
+      selectedMethod = method.id;
+      methodGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+    });
+    methodGrid.appendChild(btn);
   });
 
   document.getElementById("dateExpense").value = todayStr();
@@ -373,6 +401,8 @@
       setMode("gasto");
       selectedCategory = ex.category;
       catGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.cat === ex.category));
+      selectedMethod = ex.method || PAYMENT_METHODS[0].id;
+      methodGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.method === selectedMethod));
       document.getElementById("amountExpense").value = ex.amount;
       document.getElementById("noteExpense").value = ex.note || "";
       document.getElementById("dateExpense").value = ex.date;
@@ -425,13 +455,13 @@
 
     if(editing && editing.type === "gasto"){
       const ex = expenses.find(e2 => e2.id === editing.id);
-      if(ex){ ex.amount = amount; ex.category = selectedCategory; ex.note = note; ex.date = date; }
+      if(ex){ ex.amount = amount; ex.category = selectedCategory; ex.method = selectedMethod; ex.note = note; ex.date = date; }
       saveExpenses();
       cancelEdit();
     } else {
       expenses.push({
         id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
-        amount, category: selectedCategory, note, date,
+        amount, category: selectedCategory, method: selectedMethod, note, date,
         createdAt: new Date().toISOString()
       });
       saveExpenses();
@@ -540,13 +570,17 @@
         dayGroups[date].forEach(item => {
           const isIncome = item.kind === "ingreso";
           const meta = isIncome ? sourceById(item.source) : catById(item.category);
+          const subtitleParts = [];
+          if(!isIncome) subtitleParts.push(methodById(item.method).name);
+          if(item.note) subtitleParts.push(item.note);
+          const subtitle = subtitleParts.map(escapeHtml).join(" · ");
           const row = document.createElement("div");
           row.className = "expense";
           row.innerHTML = `
             <div class="emoji">${meta.emoji}</div>
             <div class="info">
               <div class="cat-name">${meta.name}</div>
-              ${item.note ? `<div class="note">${escapeHtml(item.note)}</div>` : ""}
+              ${subtitle ? `<div class="note">${subtitle}</div>` : ""}
             </div>
             <div class="amt ${isIncome ? "income-amt" : "expense-amt"}">${isIncome ? "+" : "-"}${fmt(item.amount)}</div>
             <div class="actions">
@@ -597,8 +631,8 @@
 
   document.getElementById("exportCsvBtn").addEventListener("click", () => {
     const all = [
-      ...expenses.map(e => ({ ...e, kind:"Gasto", categoria: catById(e.category).name, signedAmount: -e.amount })),
-      ...incomes.map(i => ({ ...i, kind:"Ingreso", categoria: sourceById(i.source).name, signedAmount: i.amount }))
+      ...expenses.map(e => ({ ...e, kind:"Gasto", categoria: catById(e.category).name, metodo: methodById(e.method).name, signedAmount: -e.amount })),
+      ...incomes.map(i => ({ ...i, kind:"Ingreso", categoria: sourceById(i.source).name, metodo: "", signedAmount: i.amount }))
     ].sort((a,b) => (a.date + a.createdAt).localeCompare(b.date + b.createdAt));
 
     if(all.length === 0){
@@ -606,9 +640,9 @@
       return;
     }
 
-    const header = ["Fecha","Tipo","Categoría / Fuente","Descripción","Monto"];
+    const header = ["Fecha","Tipo","Categoría / Fuente","Método de pago","Descripción","Monto"];
     const rows = all.map(item => [
-      item.date, item.kind, item.categoria, item.note || "", item.signedAmount.toFixed(2)
+      item.date, item.kind, item.categoria, item.metodo, item.note || "", item.signedAmount.toFixed(2)
     ]);
     const csv = [header, ...rows].map(r => r.map(csvEscape).join(",")).join("\r\n");
 
@@ -678,6 +712,14 @@
     });
     const catItems = CATEGORIES.map(c => ({ ...c, total: catTotals[c.id] || 0 }));
     renderBarList(document.getElementById("catSummary"), catItems, "Sin gastos registrados en este mes.");
+
+    const methodTotals = {};
+    expenses.filter(e => e.date.slice(0,7) === monthKey).forEach(e => {
+      const methodId = methodById(e.method).id;
+      methodTotals[methodId] = (methodTotals[methodId] || 0) + e.amount;
+    });
+    const methodItems = PAYMENT_METHODS.map(m => ({ ...m, total: methodTotals[m.id] || 0 }));
+    renderBarList(document.getElementById("methodSummary"), methodItems, "Sin gastos registrados en este mes.");
 
     const srcTotals = {};
     incomes.filter(i => i.date.slice(0,7) === monthKey).forEach(i => {
