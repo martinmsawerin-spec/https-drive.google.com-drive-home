@@ -126,11 +126,24 @@
 
   .cards-list .purchase-card{align-items:center}
   .cards-list .card-name-input{flex:1;background:transparent;border:none;color:var(--text);font-size:.9rem;font-weight:600;outline:none}
-  .closing-day-row{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .closing-day-row{display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
   .closing-day-row label{font-size:.72rem;color:var(--muted)}
-  .closing-day-row input{width:46px;background:var(--card-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:3px 5px;text-align:center}
+  .closing-day-row input[type=number]{width:46px;background:var(--card-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:3px 5px;text-align:center}
+  .closing-day-row input[type=date]{background:var(--card-2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.78rem;padding:3px 5px;color-scheme:dark}
+  .closing-day-row .ics-btn{background:none;border:none;color:var(--accent);font-size:.9rem;cursor:pointer;padding:2px 4px}
 
   .new-purchase-hint{background:var(--accent-tint);border:1px solid var(--accent);border-radius:10px;padding:10px 12px;margin:-2px 0 14px;font-size:.8rem;color:var(--accent);line-height:1.4}
+
+  .due-banner{background:var(--accent-tint);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 14px;margin-bottom:14px}
+  .due-banner.overdue{background:rgba(248,113,113,.14);border-color:var(--danger)}
+  .due-banner .due-title{font-weight:700;font-size:.85rem;margin-bottom:8px;color:var(--accent)}
+  .due-banner.overdue .due-title{color:var(--danger)}
+  .due-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}
+  .due-row:first-of-type{border-top:none}
+  .due-row .due-info{font-size:.82rem}
+  .due-row .due-info .due-card{font-weight:600}
+  .due-row .due-info .due-when{color:var(--muted);display:block;font-size:.74rem;margin-top:1px}
+  .due-row button{background:var(--card-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 10px;font-size:.76rem;font-weight:600;cursor:pointer;flex-shrink:0}
 
   ::-webkit-scrollbar{display:none}
 
@@ -167,6 +180,8 @@
 </header>
 
 <div class="container">
+  <div id="dueDatesBanner"></div>
+
   <div class="summary">
     <div class="box">
       <div class="label">Este mes</div>
@@ -372,6 +387,88 @@
   function uid(){ return Date.now() + "-" + Math.random().toString(36).slice(2,7); }
   function cardById(id){ return cards.find(c => c.id === id); }
 
+  // ---------- Recordatorios de vencimiento ----------
+  function addDaysToDateStr(dateStr, days){
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  }
+  function daysBetweenDateStr(a, b){
+    return Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 86400000);
+  }
+  function icsEscape(s){
+    return String(s).replace(/\\/g,"\\\\").replace(/,/g,"\\,").replace(/;/g,"\\;").replace(/\n/g,"\\n");
+  }
+  function downloadDueDateIcs(card){
+    const dt = card.nextDueDate.replace(/-/g,"");
+    const stamp = new Date().toISOString().replace(/[-:]/g,"").split(".")[0] + "Z";
+    const ics = [
+      "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Mis Cuotas//ES","CALSCALE:GREGORIAN",
+      "BEGIN:VEVENT",
+      "UID:vencimiento-" + card.id + "-" + dt + "@miscuotas",
+      "DTSTAMP:" + stamp,
+      "DTSTART;VALUE=DATE:" + dt,
+      "DTEND;VALUE=DATE:" + dt,
+      "SUMMARY:Vencimiento " + icsEscape(card.name),
+      "DESCRIPTION:Vencimiento del resumen de " + icsEscape(card.name),
+      "BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:Recordatorio de pago","TRIGGER:-P1D","END:VALARM",
+      "END:VEVENT","END:VCALENDAR"
+    ].join("\r\n");
+    const blob = new Blob([ics], { type:"text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "vencimiento-" + card.name.replace(/[^a-z0-9]+/gi,"-").toLowerCase() + ".ics";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  function renderDueBanner(){
+    const container = document.getElementById("dueDatesBanner");
+    const today = todayDateStr();
+    const horizon = addDaysToDateStr(today, 5);
+    const withDue = cards.filter(c => c.nextDueDate);
+    const overdue = withDue.filter(c => c.nextDueDate < today).sort((a,b) => a.nextDueDate.localeCompare(b.nextDueDate));
+    const upcoming = withDue.filter(c => c.nextDueDate >= today && c.nextDueDate <= horizon).sort((a,b) => a.nextDueDate.localeCompare(b.nextDueDate));
+    if(overdue.length === 0 && upcoming.length === 0){ container.innerHTML = ""; return; }
+
+    function dueLabel(dateStr){
+      return new Date(dateStr + "T00:00:00").toLocaleDateString("es", { day:"numeric", month:"short" });
+    }
+    function rowHtml(c, whenText){
+      return `
+        <div class="due-row">
+          <div class="due-info"><span class="due-card">${escapeHtml(c.name)}</span><span class="due-when">${whenText}</span></div>
+          <button type="button" class="ics-btn-banner" data-id="${c.id}">📅 Recordar</button>
+        </div>`;
+    }
+
+    let html = "";
+    if(overdue.length){
+      html += `<div class="due-banner overdue"><div class="due-title">⚠️ Vencimientos pasados</div>` +
+        overdue.map(c => {
+          const d = daysBetweenDateStr(c.nextDueDate, today);
+          return rowHtml(c, `Venció el ${dueLabel(c.nextDueDate)} (hace ${d} día${d===1?"":"s"})`);
+        }).join("") + `</div>`;
+    }
+    if(upcoming.length){
+      html += `<div class="due-banner"><div class="due-title">🔔 Próximos vencimientos</div>` +
+        upcoming.map(c => {
+          const d = daysBetweenDateStr(today, c.nextDueDate);
+          const when = d === 0 ? "Vence hoy" : d === 1 ? "Vence mañana" : `Vence en ${d} días (${dueLabel(c.nextDueDate)})`;
+          return rowHtml(c, when);
+        }).join("") + `</div>`;
+    }
+    container.innerHTML = html;
+    container.querySelectorAll(".ics-btn-banner").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = cardById(btn.dataset.id);
+        if(card) downloadDueDateIcs(card);
+      });
+    });
+  }
+
   function todayMonthStr(){
     const d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0");
@@ -549,7 +646,12 @@
           <div class="meta">${purchaseCount} compra${purchaseCount === 1 ? "" : "s"} cargada${purchaseCount === 1 ? "" : "s"}</div>
           <div class="closing-day-row">
             <label for="closing-${card.id}">Día de cierre</label>
-            <input type="number" id="closing-${card.id}" min="1" max="31" value="${card.closingDay || ""}" placeholder="—" data-id="${card.id}">
+            <input type="number" id="closing-${card.id}" min="1" max="31" value="${card.closingDay || ""}" placeholder="—" data-id="${card.id}" data-field="closingDay">
+          </div>
+          <div class="closing-day-row">
+            <label for="due-${card.id}">Vencimiento</label>
+            <input type="date" id="due-${card.id}" value="${card.nextDueDate || ""}" data-id="${card.id}" data-field="nextDueDate">
+            <button type="button" class="ics-btn" data-id="${card.id}" title="Agregar recordatorio al calendario">📅</button>
           </div>
         </div>
         <div class="actions">
@@ -558,7 +660,7 @@
       `;
       list.appendChild(row);
     });
-    list.querySelectorAll(".closing-day-row input").forEach(input => {
+    list.querySelectorAll('.closing-day-row input[data-field="closingDay"]').forEach(input => {
       input.addEventListener("change", () => {
         const card = cardById(input.dataset.id);
         if(!card) return;
@@ -567,6 +669,22 @@
         input.value = card.closingDay || "";
         saveCards();
         updateNewPurchaseHint();
+      });
+    });
+    list.querySelectorAll('.closing-day-row input[data-field="nextDueDate"]').forEach(input => {
+      input.addEventListener("change", () => {
+        const card = cardById(input.dataset.id);
+        if(!card) return;
+        card.nextDueDate = input.value || null;
+        saveCards();
+        renderDueBanner();
+      });
+    });
+    list.querySelectorAll(".ics-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const card = cardById(btn.dataset.id);
+        if(!card || !card.nextDueDate){ alert("Cargá primero la fecha de vencimiento de esta tarjeta."); return; }
+        downloadDueDateIcs(card);
       });
     });
     list.querySelectorAll(".del").forEach(btn => {
@@ -587,6 +705,7 @@
         renderPurchases();
         renderProjection();
         renderSummary();
+        renderDueBanner();
         updateNewPurchaseHint();
       });
     });
@@ -602,6 +721,7 @@
   document.getElementById("statementMonth").value = todayMonthStr();
   refreshAllCardGrids();
   renderCardsTab();
+  renderDueBanner();
 
   // ---------- Tabs ----------
   document.querySelectorAll(".tabs button").forEach(tabBtn => {
@@ -1017,6 +1137,51 @@
     return first.year + "-" + String(first.month).padStart(2,"0");
   }
 
+  // ---------- Due date (vencimiento) detection ----------
+  function detectDueDate(text, statementMonth){
+    // Formato "VENCIMIENTO   SALDO $ ...\n DD Mon YY   monto..." (Banco Nación)
+    let m = text.match(/VENCIMIENTO\s+SALDO\s*\$[\s\S]{0,60}?(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3,})\.?\s+(\d{2,4})/i);
+    if(m){
+      const day = parseInt(m[1],10);
+      const monthKey = m[2].slice(0,3).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+      const month = MONTH_ABBR[monthKey];
+      let year = parseInt(m[3],10);
+      if(year < 100) year += 2000;
+      if(month && day >= 1 && day <= 31) return year + "-" + String(month).padStart(2,"0") + "-" + String(day).padStart(2,"0");
+    }
+    // Tabla de 6 fechas DD/MM/YY: la 4ta columna es "Vencimiento actual"
+    m = text.match(/\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}\/\d{1,2}\/\d{2,4}/);
+    if(m){
+      const day = parseInt(m[1],10), month = parseInt(m[2],10);
+      let year = parseInt(m[3],10);
+      if(year < 100) year += 2000;
+      if(month >= 1 && month <= 12 && day >= 1 && day <= 31) return year + "-" + String(month).padStart(2,"0") + "-" + String(day).padStart(2,"0");
+    }
+    // Alternativa general: buscar la primera fecha (en cualquiera de los formatos soportados)
+    // cuyo mes/año coincida con el mes de resumen ya detectado — suele ser el vencimiento.
+    if(statementMonth){
+      const [sy, sm] = statementMonth.split("-").map(Number);
+      const tokenRe = /(\d{1,2})[\/\-.]([A-Za-zÁÉÍÓÚáéíóú]{3,9}|\d{1,2})[\/\-.](\d{2,4})/g;
+      let tm;
+      while((tm = tokenRe.exec(text)) !== null){
+        const day = parseInt(tm[1],10);
+        let month;
+        if(/^\d+$/.test(tm[2])){
+          month = parseInt(tm[2],10);
+        } else {
+          const key = tm[2].slice(0,3).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+          month = MONTH_ABBR[key];
+        }
+        let year = parseInt(tm[3],10);
+        if(year < 100) year += 2000;
+        if(month === sm && year === sy && day >= 1 && day <= 31){
+          return year + "-" + String(month).padStart(2,"0") + "-" + String(day).padStart(2,"0");
+        }
+      }
+    }
+    return null;
+  }
+
   document.getElementById("analyzeBtn").addEventListener("click", () => {
     const text = document.getElementById("statementText").value;
     const { installments, usedLines } = parseStatementText(text);
@@ -1029,12 +1194,14 @@
     renderRecurringPreview();
 
     const hint = document.getElementById("dateDetectHint");
+    let resolvedStatementMonth = null;
+    let msg = "";
     const closing = parseClosingDateFromText(text);
     if(closing){
       const closingMonthStr = closing.year + "-" + String(closing.month).padStart(2,"0");
-      const statementMonth = addMonths(closingMonthStr, 1);
-      document.getElementById("statementMonth").value = statementMonth;
-      let msg = `Detecté cierre el día ${closing.day} de ${monthLabel(closingMonthStr)} → mes de resumen: ${monthLabel(statementMonth)}.`;
+      resolvedStatementMonth = addMonths(closingMonthStr, 1);
+      document.getElementById("statementMonth").value = resolvedStatementMonth;
+      msg = `Detecté cierre el día ${closing.day} de ${monthLabel(closingMonthStr)} → mes de resumen: ${monthLabel(resolvedStatementMonth)}.`;
       const card = cardById(selectedCardImport);
       if(card){
         card.closingDay = closing.day;
@@ -1043,17 +1210,32 @@
         renderCardsTab();
         msg += ` Actualicé el día de cierre de "${card.name}" a ${closing.day}.`;
       }
+    } else {
+      resolvedStatementMonth = detectStatementMonthFromCuotasAVencer(text);
+      if(resolvedStatementMonth){
+        document.getElementById("statementMonth").value = resolvedStatementMonth;
+        msg = `Detecté mes de resumen: ${monthLabel(resolvedStatementMonth)} (a partir de "Cuotas a vencer"). No pude leer el día exacto de cierre — si querés que las próximas compras se calculen solas, cargalo en la pestaña Tarjetas.`;
+      }
+    }
+
+    const dueDate = detectDueDate(text, resolvedStatementMonth);
+    if(dueDate){
+      const card = cardById(selectedCardImport);
+      if(card){
+        card.nextDueDate = dueDate;
+        saveCards();
+        renderCardsTab();
+        renderDueBanner();
+        const dueLabelText = new Date(dueDate + "T00:00:00").toLocaleDateString("es", { day:"numeric", month:"long", year:"numeric" });
+        msg += (msg ? " " : "") + `Vencimiento detectado: ${dueLabelText}.`;
+      }
+    }
+
+    if(msg){
       hint.textContent = msg;
       hint.style.display = "block";
     } else {
-      const fallbackMonth = detectStatementMonthFromCuotasAVencer(text);
-      if(fallbackMonth){
-        document.getElementById("statementMonth").value = fallbackMonth;
-        hint.textContent = `Detecté mes de resumen: ${monthLabel(fallbackMonth)} (a partir de "Cuotas a vencer"). No pude leer el día exacto de cierre — si querés que las próximas compras se calculen solas, cargalo en la pestaña Tarjetas.`;
-        hint.style.display = "block";
-      } else {
-        hint.style.display = "none";
-      }
+      hint.style.display = "none";
     }
   });
 
