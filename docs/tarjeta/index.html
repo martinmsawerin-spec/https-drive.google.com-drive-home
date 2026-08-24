@@ -831,31 +831,76 @@
     // "12/05/25   Merpago*electronicafla   15 de 18   816341   $ 49.999,94"
     // fecha, descripción, "N de M", comprobante opcional, $ monto en pesos
     /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+(.{3,80}?)\s+(\d{1,2})\s+de\s+(\d{1,2})\s+(?:\d{3,8}\s+)?\$\s*(-?[\d.,]+)\s*$/i,
+    // "18-Jun-26   BOCASHOP   C.03/03   000568   86.099,40" (formato con mes abreviado y guiones)
+    /^\d{1,2}-[A-Za-zÁÉÍÓÚáéíóú]{3,9}-\d{2,4}\s+(.{3,80}?)\s+(?:c\.?\s*)?(\d{1,2})\s*\/\s*(\d{1,2})\s+(?:\d{3,8}\s+)?\$?\s*(-?[\d.,]+)\s*$/i,
     // "NOMBRE DEL COMERCIO   03/12   $5.000,00" (sin fecha al inicio)
     /^(.{3,80}?)\s+(?:c\.?\s*)?(\d{1,2})\s*\/\s*(\d{1,2})\s+\$?\s*(-?[\d.,]+)\s*$/i
   ];
 
+  // Algunos PDF parten una misma fila en varias líneas de texto (ej: el monto queda solo en la
+  // línea siguiente, o la fecha queda sola y el resto de la fila en la línea de abajo). Se prueba
+  // cada línea sola primero; solo si no matchea con un monto de forma válida (termina en coma +
+  // 2 dígitos, ej "86.099,40" — así no confunde un número de cupón como "000568" con el monto),
+  // Y la línea muestra evidencia clara de ser un fragmento partido (fecha sola, o ya tiene fecha +
+  // marcador de cuota pero sin monto), se prueba unirla con la línea siguiente. Nunca se fusiona
+  // "a ciegas" una línea que simplemente no matcheó nada, para no mezclar dos filas distintas.
+  function splitNonEmptyLines(text){
+    return text.split("\n").map(l => l.trim()).filter(Boolean);
+  }
+  function isValidAmountFormat(raw){
+    return /,\d{2}$/.test(String(raw).trim());
+  }
+  function isBareDateLine(line){
+    return /^\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}$/.test(line) || /^\d{1,2}-[A-Za-zÁÉÍÓÚáéíóú]{3,9}-\d{2,4}$/i.test(line);
+  }
+  const ROW_MISSING_AMOUNT_PATTERNS = [
+    // fecha + comprobante opcional + descripción + C.N/M [+ cupón], sin monto al final
+    /^\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s+(?:\d{3,8}\s+)?.{3,80}?\s+(?:c\.?\s*)?\d{1,2}\s*\/\s*\d{1,2}(?:\s+\d{3,8})?\s*$/i,
+    // fecha + descripción + "N de M" [+ comprobante], sin monto al final
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+.{3,80}?\s+\d{1,2}\s+de\s+\d{1,2}(?:\s+\d{3,8})?\s*$/i,
+    // fecha DD-Mon-YY + descripción + C.N/M [+ cupón], sin monto al final
+    /^\d{1,2}-[A-Za-zÁÉÍÓÚáéíóú]{3,9}-\d{2,4}\s+.{3,80}?\s+(?:c\.?\s*)?\d{1,2}\s*\/\s*\d{1,2}(?:\s+\d{3,8})?\s*$/i
+  ];
+  function canMergeForCuota(line){
+    return isBareDateLine(line) || ROW_MISSING_AMOUNT_PATTERNS.some(re => re.test(line));
+  }
+  function canMergeForSinglePayment(line){
+    return isBareDateLine(line);
+  }
+  function matchLineWithLookahead(lines, i, patterns, canMerge){
+    const line = lines[i];
+    for(const re of patterns){
+      const m = line.match(re);
+      if(m && isValidAmountFormat(m[m.length-1])) return { match:m, used:[line], skipNext:false };
+    }
+    if(i+1 < lines.length && canMerge(line)){
+      const merged = line + " " + lines[i+1];
+      for(const re of patterns){
+        const m = merged.match(re);
+        if(m && isValidAmountFormat(m[m.length-1])) return { match:m, used:[line, lines[i+1]], skipNext:true };
+      }
+    }
+    return null;
+  }
+
   function parseStatementText(text){
     const results = [];
     const usedLines = new Set();
-    text.split("\n").forEach(rawLine => {
-      const line = rawLine.trim();
-      if(!line) return;
-      let m = null;
-      for(const re of STATEMENT_LINE_PATTERNS){
-        m = line.match(re);
-        if(m) break;
-      }
-      if(!m) return;
+    const lines = splitNonEmptyLines(text);
+    for(let i=0; i<lines.length; i++){
+      const result = matchLineWithLookahead(lines, i, STATEMENT_LINE_PATTERNS, canMergeForCuota);
+      if(!result) continue;
+      const m = result.match;
       const description = m[1].trim();
       const currentInstallment = parseInt(m[2], 10);
       const totalInstallments = parseInt(m[3], 10);
       const amount = parseAmountAR(m[4]);
-      if(!description || !amount || amount <= 0) return;
-      if(currentInstallment < 1 || totalInstallments < 1 || currentInstallment > totalInstallments) return;
-      usedLines.add(line);
+      if(result.skipNext) i++;
+      if(!description || !amount || amount <= 0) continue;
+      if(currentInstallment < 1 || totalInstallments < 1 || currentInstallment > totalInstallments) continue;
+      result.used.forEach(l => usedLines.add(l));
       results.push({ description, currentInstallment, totalInstallments, amount, include:true });
-    });
+    }
     return { installments: results, usedLines };
   }
 
@@ -867,6 +912,8 @@
     // "30/06/26   Personal 300072999371001   030554   $ 63.850,91" (formato BBVA, sin cuota)
     // Se prueba primero porque el "$" obligatorio evita que trague de más un comprobante numérico.
     /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+([^$\n]{3,80}?)\s+(?:\d{3,8}\s+)?\$\s*(-?[\d.,]+)\s*$/i,
+    // "23-Jul-26   PROMO SUELDO CUOTA 2   -120.000,00" (formato con mes abreviado y guiones, sin cuota)
+    /^\d{1,2}-[A-Za-zÁÉÍÓÚáéíóú]{3,9}-\d{2,4}\s+(?:\d{3,8}\s+)?([^$\n]{3,80}?)\s+\$?\s*(-?[\d.,]+)\s*$/i,
     // "04.11.24   005822   VISAUR   11.563,54   0,00" (mismo formato que Banco Nación, sin cuota)
     // La descripción no puede contener "$" — evita que trague un monto en U$S como si fuera texto.
     /^\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4}\s+(?:\d{3,8}\s+)?([^$\n]{3,80}?)\s+\$?\s*(-?[\d.,]+)(?:\s+-?[\d.,]+)?\s*$/i
@@ -880,24 +927,22 @@
   }
   function parseRecurringCandidates(text, usedLines){
     const results = [];
-    text.split("\n").forEach(rawLine => {
-      const line = rawLine.trim();
-      if(!line || usedLines.has(line)) return;
-      let m = null;
-      for(const re of SINGLE_PAYMENT_PATTERNS){
-        m = line.match(re);
-        if(m) break;
-      }
-      if(!m) return;
+    const lines = splitNonEmptyLines(text);
+    for(let i=0; i<lines.length; i++){
+      if(usedLines.has(lines[i])) continue;
+      const result = matchLineWithLookahead(lines, i, SINGLE_PAYMENT_PATTERNS, canMergeForSinglePayment);
+      if(!result) continue;
+      if(result.skipNext) i++;
+      const m = result.match;
       const description = m[1].trim();
       const rawAmount = m[2].trim();
-      if(rawAmount.startsWith("-")) return; // pago o devolución, no un cargo
+      if(rawAmount.startsWith("-")) continue; // pago o devolución, no un cargo
       const amount = parseAmountAR(rawAmount);
-      if(!description || !amount || amount <= 0) return;
+      if(!description || !amount || amount <= 0) continue;
       const normalized = normalizeForMatch(description);
-      if(RECURRING_EXCLUDE_KEYWORDS.some(k => normalized.includes(k))) return;
+      if(RECURRING_EXCLUDE_KEYWORDS.some(k => normalized.includes(k))) continue;
       results.push({ description, amount, include:false });
-    });
+    }
     return results;
   }
 
@@ -930,6 +975,48 @@
     return null;
   }
 
+  // Alternativa cuando no se pudo leer la fecha exacta de cierre: el listado "Cuotas a vencer"
+  // siempre arranca con el mes de ESTE resumen, sin importar el orden en que haya quedado el
+  // texto extraído del PDF (algunos PDF mezclan el orden de las columnas de una tabla).
+  function detectStatementMonthFromCuotasAVencer(text){
+    const labelIdx = text.toLowerCase().search(/cuotas a vencer/);
+    if(labelIdx === -1) return null;
+    const tokenRe = /([A-Za-zÁÉÍÓÚáéíóú]{3,})[\/\s]+(\d{2,4})\b/g;
+    const tokens = [];
+    let m;
+    while((m = tokenRe.exec(text)) !== null){
+      const monthKey = m[1].slice(0,3).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+      const month = MONTH_ABBR[monthKey];
+      if(!month) continue;
+      let year = parseInt(m[2], 10);
+      if(year < 100) year += 2000;
+      tokens.push({ index: m.index, month, year });
+    }
+    if(tokens.length === 0) return null;
+    // Agrupar tokens consecutivos (mismo listado de meses) en "corridas".
+    const runs = [[tokens[0]]];
+    for(let i=1; i<tokens.length; i++){
+      if(tokens[i].index - tokens[i-1].index < 40){
+        runs[runs.length-1].push(tokens[i]);
+      } else {
+        runs.push([tokens[i]]);
+      }
+    }
+    // Elegir la corrida mas cercana a la etiqueta "cuotas a vencer" (este antes o despues),
+    // y devolver el PRIMER mes de esa corrida (el orden cronologico ya viene de izquierda a derecha).
+    let bestRun = null, bestDist = Infinity;
+    runs.forEach(run => {
+      const dist = Math.min(...run.map(t => Math.abs(t.index - labelIdx)));
+      if(dist < bestDist && dist < 400){
+        bestDist = dist;
+        bestRun = run;
+      }
+    });
+    if(!bestRun) return null;
+    const first = bestRun[0];
+    return first.year + "-" + String(first.month).padStart(2,"0");
+  }
+
   document.getElementById("analyzeBtn").addEventListener("click", () => {
     const text = document.getElementById("statementText").value;
     const { installments, usedLines } = parseStatementText(text);
@@ -959,7 +1046,14 @@
       hint.textContent = msg;
       hint.style.display = "block";
     } else {
-      hint.style.display = "none";
+      const fallbackMonth = detectStatementMonthFromCuotasAVencer(text);
+      if(fallbackMonth){
+        document.getElementById("statementMonth").value = fallbackMonth;
+        hint.textContent = `Detecté mes de resumen: ${monthLabel(fallbackMonth)} (a partir de "Cuotas a vencer"). No pude leer el día exacto de cierre — si querés que las próximas compras se calculen solas, cargalo en la pestaña Tarjetas.`;
+        hint.style.display = "block";
+      } else {
+        hint.style.display = "none";
+      }
     }
   });
 
