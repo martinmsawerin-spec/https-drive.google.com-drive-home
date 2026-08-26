@@ -111,8 +111,21 @@
 
   .month-block{margin-bottom:12px;background:var(--card);border-radius:var(--radius);overflow:hidden}
   .month-block-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer}
+  .month-block-head .m-label-wrap{display:flex;flex-direction:column;gap:2px}
   .month-block-head .m-label{font-weight:700;text-transform:capitalize;font-size:.92rem}
   .month-block-head .m-total{font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+  .m-delta{font-size:.7rem;font-weight:600}
+  .m-delta.up{color:var(--danger)}
+  .m-delta.down{color:#4ade80}
+  .m-delta.flat{color:var(--muted)}
+
+  .month-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .month-nav button{background:var(--card-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 14px;cursor:pointer;font-size:1rem}
+  .month-nav .label{font-weight:700;font-size:.85rem;text-transform:capitalize;text-align:center}
+
+  .card-breakdown-title{font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:12px 0 4px}
+  .month-detail-row.card-subtotal .desc{font-weight:700;color:var(--text)}
+  .month-detail-row.card-subtotal .amt{color:var(--accent)}
   .month-block-detail{display:none;padding:0 16px 14px;border-top:1px solid var(--border)}
   .month-block.open .month-block-detail{display:block}
   .month-block.open .chevron{transform:rotate(180deg)}
@@ -333,6 +346,11 @@
   <div class="view" id="view-projection">
     <div class="filter-row">
       <select class="field" id="filterCardProjection"></select>
+    </div>
+    <div class="month-nav">
+      <button type="button" id="projPrevRange">‹</button>
+      <div class="label" id="projRangeLabel"></div>
+      <button type="button" id="projNextRange">›</button>
     </div>
     <div id="projectionList"></div>
   </div>
@@ -1464,6 +1482,24 @@
   // ---------- Projection ----------
   const NEXT_MONTHS = 6;
   let openMonths = {};
+  let projectionMonthOffset = 0; // 0 = arranca en el mes actual; negativo = meses hacia atrás
+
+  function monthTotalForRange(relevant, monthStr){
+    let total = 0;
+    relevant.forEach(p => {
+      if(installmentNumberForMonth(p, monthStr) !== null) total += p.installmentAmount;
+    });
+    return total;
+  }
+
+  document.getElementById("projPrevRange").addEventListener("click", () => {
+    projectionMonthOffset -= 1;
+    renderProjection();
+  });
+  document.getElementById("projNextRange").addEventListener("click", () => {
+    projectionMonthOffset += 1;
+    renderProjection();
+  });
 
   function renderProjection(){
     const list = document.getElementById("projectionList");
@@ -1471,9 +1507,15 @@
     const relevant = purchases.filter(p => filter === "all" || p.cardId === filter);
     const currentMonth = todayMonthStr();
 
+    const rangeStart = addMonths(currentMonth, projectionMonthOffset);
+    const rangeEnd = addMonths(currentMonth, projectionMonthOffset + NEXT_MONTHS - 1);
+    document.getElementById("projRangeLabel").textContent =
+      `${monthLabel(rangeStart)} — ${monthLabel(rangeEnd)}`;
+
     list.innerHTML = "";
     for(let i=0; i<NEXT_MONTHS; i++){
-      const monthStr = addMonths(currentMonth, i);
+      const monthStr = addMonths(currentMonth, projectionMonthOffset + i);
+      const isCurrentMonth = projectionMonthOffset + i === 0;
       const rows = [];
       relevant.forEach(p => {
         const n = installmentNumberForMonth(p, monthStr);
@@ -1481,18 +1523,50 @@
       });
       const total = rows.reduce((s,r) => s + r.purchase.installmentAmount, 0);
 
+      const prevTotal = monthTotalForRange(relevant, addMonths(monthStr, -1));
+      let deltaHtml = "";
+      if(prevTotal > 0){
+        const pct = Math.round(((total - prevTotal) / prevTotal) * 100);
+        const cls = pct > 0 ? "up" : pct < 0 ? "down" : "flat";
+        const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "■";
+        deltaHtml = `<span class="m-delta ${cls}">${arrow} ${pct > 0 ? "+" : ""}${pct}% vs ${monthLabel(addMonths(monthStr,-1)).split(" ")[0].slice(0,3)}.</span>`;
+      }
+
+      const cardTotals = {};
+      rows.forEach(r => {
+        cardTotals[r.purchase.cardId] = (cardTotals[r.purchase.cardId] || 0) + r.purchase.installmentAmount;
+      });
+      const cardIds = Object.keys(cardTotals);
+      const breakdownHtml = cardIds.length > 1
+        ? `<div class="card-breakdown-title">Por tarjeta</div>` +
+          cardIds
+            .sort((a,b) => cardTotals[b] - cardTotals[a])
+            .map(cardId => {
+              const card = cardById(cardId);
+              return `<div class="month-detail-row card-subtotal">
+                <span class="dot" style="background:${card ? card.color : "#999"}"></span>
+                <span class="desc">${card ? escapeHtml(card.name) : "Sin tarjeta"}</span>
+                <span class="amt">${fmt(cardTotals[cardId])}</span>
+              </div>`;
+            }).join("") +
+          `<div class="card-breakdown-title">Detalle</div>`
+        : "";
+
       const block = document.createElement("div");
       block.className = "month-block" + (openMonths[monthStr] ? " open" : "");
       block.innerHTML = `
         <div class="month-block-head">
-          <span class="m-label">${monthLabel(monthStr)}${i===0 ? " (este mes)" : ""}</span>
+          <div class="m-label-wrap">
+            <span class="m-label">${monthLabel(monthStr)}${isCurrentMonth ? " (este mes)" : ""}</span>
+            ${deltaHtml}
+          </div>
           <span style="display:flex;align-items:center;gap:8px">
             <span class="m-total">${fmt(total)}</span>
             <span class="chevron">▾</span>
           </span>
         </div>
         <div class="month-block-detail">
-          ${rows.length === 0 ? '<div class="empty" style="padding:14px 0">Sin cuotas comprometidas.</div>' : rows.map(r => {
+          ${rows.length === 0 ? '<div class="empty" style="padding:14px 0">Sin cuotas comprometidas.</div>' : breakdownHtml + rows.map(r => {
             const card = cardById(r.purchase.cardId);
             return `<div class="month-detail-row">
               <span class="dot" style="background:${card ? card.color : "#999"}"></span>
