@@ -114,13 +114,16 @@
   .cat-row .amt{font-size:.8rem;color:var(--muted);width:70px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
 
   .usd-savings-box{background:var(--card);border-radius:var(--radius);padding:14px;margin:0 0 16px}
-  .usd-savings-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
-  .usd-savings-top .label{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
-  .usd-savings-top .value{font-size:1.25rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;color:#4ade80}
-  .usd-rate-field{text-align:right}
-  .usd-rate-field label{display:block;font-size:.68rem;color:var(--muted);margin-bottom:3px}
-  .usd-rate-field input{width:120px;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;color:var(--text);font-size:.85rem;text-align:right}
-  .usd-equivalent{margin-top:8px;font-size:.78rem;color:var(--muted)}
+  .usd-savings-box .label{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .usd-savings-box .value{font-size:1.25rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;color:#4ade80}
+  .usd-equivalent{margin-top:6px;font-size:.78rem;color:var(--muted)}
+
+  .ahorro-usd-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:14px}
+  .ahorro-usd-row .rate-field{display:flex;flex-direction:column;gap:3px}
+  .ahorro-usd-row .rate-field label{font-size:.7rem;color:var(--muted)}
+  .ahorro-usd-row .rate-field input{width:110px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 8px;color:var(--text);font-size:.85rem}
+  .ahorro-usd-row .usd-preview{font-size:.9rem;font-weight:700;color:#4ade80;text-align:right}
+  .ahorro-usd-row .usd-preview-label{display:block;font-size:.68rem;font-weight:500;color:var(--muted)}
 
   ::-webkit-scrollbar{display:none}
 
@@ -177,16 +180,8 @@
   </div>
 
   <div class="usd-savings-box" id="usdSavingsBox" style="display:none">
-    <div class="usd-savings-top">
-      <div>
-        <div class="label">🐷 Ahorro en dólares</div>
-        <div class="value" id="usdSavingsTotal">U$S 0,00</div>
-      </div>
-      <div class="usd-rate-field">
-        <label for="usdRateInput">Cotización ($ por U$S)</label>
-        <input type="number" id="usdRateInput" min="0" step="0.01" placeholder="Ej: 1200">
-      </div>
-    </div>
+    <div class="label">🐷 Ahorro en dólares</div>
+    <div class="value" id="usdSavingsTotal">U$S 0,00</div>
     <div class="usd-equivalent" id="usdEquivalentText"></div>
   </div>
 
@@ -218,8 +213,16 @@
 
         <div class="cat-grid" id="catGrid"></div>
 
-        <label class="field-label" id="currencyLabel" style="display:none;font-size:.75rem;color:var(--muted);margin-bottom:6px;font-weight:600">Moneda del ahorro</label>
-        <div class="source-grid" id="currencyGrid" style="display:none"></div>
+        <div class="ahorro-usd-row" id="ahorroUsdRow" style="display:none">
+          <div class="rate-field">
+            <label for="usdRateExpense">Cotización ($ por U$S)</label>
+            <input type="number" id="usdRateExpense" min="0" step="0.01" placeholder="Ej: 1200">
+          </div>
+          <div class="usd-preview">
+            <span class="usd-preview-label">Equivale a</span>
+            <span id="usdPreviewText">U$S 0,00</span>
+          </div>
+        </div>
 
         <label class="field-label" style="display:block;font-size:.75rem;color:var(--muted);margin-bottom:6px;font-weight:600">Método de pago</label>
         <div class="source-grid" id="methodGrid"></div>
@@ -306,15 +309,10 @@
     { id:"transferencia", name:"Transferencia/MP", emoji:"📲", color:"#3b82f6" }
   ];
 
-  const AHORRO_CURRENCIES = [
-    { id:"ars", name:"Pesos",   emoji:"💵" },
-    { id:"usd", name:"Dólares", emoji:"💲" }
-  ];
-
   const EXPENSES_KEY = "expenses_v1";
   const INCOMES_KEY = "incomes_v1";
   const CURRENCY_KEY = "currency_symbol_v1";
-  const USD_RATE_KEY = "usd_rate_v1";
+  const USD_LAST_RATE_KEY = "usd_last_rate_v1";
 
   function loadList(key){
     try{
@@ -330,7 +328,6 @@
   let selectedCategory = CATEGORIES[0].id;
   let selectedSource = SOURCES[0].id;
   let selectedMethod = PAYMENT_METHODS[0].id;
-  let selectedCurrency = AHORRO_CURRENCIES[0].id;
   let statsMonthOffset = 0; // 0 = current month
   let editing = null; // { type:'gasto'|'ingreso', id }
 
@@ -371,7 +368,7 @@
       selectedCategory = cat.id;
       catGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
       btn.classList.add("selected");
-      updateAhorroCurrencyUI();
+      updateAhorroUI();
     });
     catGrid.appendChild(btn);
   });
@@ -404,31 +401,22 @@
     methodGrid.appendChild(btn);
   });
 
-  const currencyGrid = document.getElementById("currencyGrid");
-  AHORRO_CURRENCIES.forEach(cur => {
-    const btn = document.createElement("div");
-    btn.className = "cat-btn" + (cur.id === selectedCurrency ? " selected" : "");
-    btn.dataset.currency = cur.id;
-    btn.innerHTML = `<span class="emoji">${cur.emoji}</span><span class="name">${cur.name}</span>`;
-    btn.addEventListener("click", () => {
-      selectedCurrency = cur.id;
-      currencyGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
-      btn.classList.add("selected");
-      updateAhorroCurrencyUI();
-    });
-    currencyGrid.appendChild(btn);
-  });
-
-  function updateAhorroCurrencyUI(){
+  function updateAhorroUI(){
     const isAhorro = selectedCategory === "ahorro";
-    document.getElementById("currencyLabel").style.display = isAhorro ? "block" : "none";
-    document.getElementById("currencyGrid").style.display = isAhorro ? "grid" : "none";
-    if(!isAhorro) selectedCurrency = "ars";
-    currencyGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.currency === selectedCurrency));
-    document.getElementById("currencySymbolExpense").textContent =
-      (isAhorro && selectedCurrency === "usd") ? "U$S" : currencySymbol;
+    document.getElementById("ahorroUsdRow").style.display = isAhorro ? "flex" : "none";
+    document.getElementById("usdRateExpense").required = isAhorro;
+    updateUsdPreview();
   }
-  updateAhorroCurrencyUI();
+  function updateUsdPreview(){
+    const amount = parseFloat(document.getElementById("amountExpense").value) || 0;
+    const rate = parseFloat(document.getElementById("usdRateExpense").value) || 0;
+    document.getElementById("usdPreviewText").textContent =
+      (rate > 0 && amount > 0) ? fmtUSD(amount / rate) : "U$S 0,00";
+  }
+  document.getElementById("usdRateExpense").value = localStorage.getItem(USD_LAST_RATE_KEY) || "";
+  document.getElementById("amountExpense").addEventListener("input", updateUsdPreview);
+  document.getElementById("usdRateExpense").addEventListener("input", updateUsdPreview);
+  updateAhorroUI();
 
   document.getElementById("dateExpense").value = todayStr();
   document.getElementById("dateIncome").value = todayStr();
@@ -469,11 +457,11 @@
       setMode("gasto");
       selectedCategory = ex.category;
       catGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.cat === ex.category));
-      selectedCurrency = ex.currency === "usd" ? "usd" : "ars";
-      updateAhorroCurrencyUI();
       selectedMethod = ex.method || PAYMENT_METHODS[0].id;
       methodGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.method === selectedMethod));
       document.getElementById("amountExpense").value = ex.amount;
+      document.getElementById("usdRateExpense").value = ex.usdRate || "";
+      updateAhorroUI();
       document.getElementById("noteExpense").value = ex.note || "";
       document.getElementById("dateExpense").value = ex.date;
       document.getElementById("expenseSubmitBtn").textContent = "Guardar cambios";
@@ -510,7 +498,8 @@
     document.getElementById("incomeForm").reset();
     document.getElementById("dateExpense").value = todayStr();
     document.getElementById("dateIncome").value = todayStr();
-    updateAhorroCurrencyUI();
+    document.getElementById("usdRateExpense").value = localStorage.getItem(USD_LAST_RATE_KEY) || "";
+    updateAhorroUI();
   }
   document.getElementById("cancelExpenseEdit").addEventListener("click", cancelEdit);
   document.getElementById("cancelIncomeEdit").addEventListener("click", cancelEdit);
@@ -523,23 +512,39 @@
     if(!amount || amount <= 0) return;
     const note = document.getElementById("noteExpense").value.trim();
     const date = document.getElementById("dateExpense").value || todayStr();
-    const currency = (selectedCategory === "ahorro" && selectedCurrency === "usd") ? "usd" : "ars";
+
+    let usdRate = null, usdAmount = null;
+    if(selectedCategory === "ahorro"){
+      const rate = parseFloat(document.getElementById("usdRateExpense").value);
+      if(!rate || rate <= 0){ alert("Cargá la cotización del dólar para poder convertir este ahorro."); return; }
+      usdRate = rate;
+      usdAmount = amount / rate;
+      localStorage.setItem(USD_LAST_RATE_KEY, String(rate));
+    }
 
     if(editing && editing.type === "gasto"){
       const ex = expenses.find(e2 => e2.id === editing.id);
-      if(ex){ ex.amount = amount; ex.category = selectedCategory; ex.method = selectedMethod; ex.currency = currency; ex.note = note; ex.date = date; }
+      if(ex){
+        ex.amount = amount; ex.category = selectedCategory; ex.method = selectedMethod; ex.note = note; ex.date = date;
+        delete ex.currency;
+        if(usdRate){ ex.usdRate = usdRate; ex.usdAmount = usdAmount; }
+        else { delete ex.usdRate; delete ex.usdAmount; }
+      }
       saveExpenses();
       cancelEdit();
     } else {
-      expenses.push({
+      const entry = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
-        amount, category: selectedCategory, method: selectedMethod, currency, note, date,
+        amount, category: selectedCategory, method: selectedMethod, note, date,
         createdAt: new Date().toISOString()
-      });
+      };
+      if(usdRate){ entry.usdRate = usdRate; entry.usdAmount = usdAmount; }
+      expenses.push(entry);
       saveExpenses();
       amountInput.value = "";
       document.getElementById("noteExpense").value = "";
       amountInput.focus();
+      updateUsdPreview();
     }
     renderSummary();
   });
@@ -600,29 +605,25 @@
   }
 
   // ---------- Ahorro en dólares ----------
-  const usdRateInput = document.getElementById("usdRateInput");
-  usdRateInput.value = localStorage.getItem(USD_RATE_KEY) || "";
-  usdRateInput.addEventListener("input", () => {
-    localStorage.setItem(USD_RATE_KEY, usdRateInput.value);
-    renderUsdSavingsBox();
-  });
-
   function renderUsdSavingsBox(){
-    const usdExpenses = expenses.filter(e => e.currency === "usd");
+    const legacyUsd = expenses.filter(e => e.currency === "usd");
+    const converted = expenses.filter(e => e.usdAmount);
     const box = document.getElementById("usdSavingsBox");
-    if(usdExpenses.length === 0){
+    if(legacyUsd.length === 0 && converted.length === 0){
       box.style.display = "none";
       return;
     }
     box.style.display = "block";
-    const total = usdExpenses.reduce((s,e) => s + e.amount, 0);
+    const legacyTotal = legacyUsd.reduce((s,e) => s + e.amount, 0);
+    const convertedTotal = converted.reduce((s,e) => s + e.usdAmount, 0);
+    const total = legacyTotal + convertedTotal;
     document.getElementById("usdSavingsTotal").textContent = fmtUSD(total);
 
-    const rate = parseFloat(usdRateInput.value);
+    const pesosConverted = converted.reduce((s,e) => s + e.amount, 0);
     const equivEl = document.getElementById("usdEquivalentText");
-    equivEl.textContent = (rate > 0)
-      ? `≈ ${fmt(total * rate)} al tipo de cambio cargado ($${rate.toLocaleString("es")} por U$S)`
-      : "Cargá la cotización para ver el equivalente en pesos.";
+    equivEl.textContent = pesosConverted > 0
+      ? `Convertiste ${fmt(pesosConverted)} en total.`
+      : "";
   }
 
   // ---------- History (expenses + incomes merged) ----------
@@ -681,6 +682,7 @@
           const subtitleParts = [];
           if(!isIncome) subtitleParts.push(methodById(item.method).name);
           if(isUsd) subtitleParts.push("Dólares");
+          if(!isIncome && item.usdAmount) subtitleParts.push(`≈ ${fmtUSD(item.usdAmount)} (cotiz. $${item.usdRate})`);
           if(item.note) subtitleParts.push(item.note);
           const subtitle = subtitleParts.map(escapeHtml).join(" · ");
           const row = document.createElement("div");
@@ -749,9 +751,10 @@
       return;
     }
 
-    const header = ["Fecha","Tipo","Categoría / Fuente","Método de pago","Moneda","Descripción","Monto"];
+    const header = ["Fecha","Tipo","Categoría / Fuente","Método de pago","Moneda","Descripción","Monto","Monto USD","Cotización"];
     const rows = all.map(item => [
-      item.date, item.kind, item.categoria, item.metodo, item.moneda, item.note || "", item.signedAmount.toFixed(2)
+      item.date, item.kind, item.categoria, item.metodo, item.moneda, item.note || "", item.signedAmount.toFixed(2),
+      item.usdAmount ? item.usdAmount.toFixed(2) : "", item.usdRate || ""
     ]);
     const csv = [header, ...rows].map(r => r.map(csvEscape).join(",")).join("\r\n");
 
