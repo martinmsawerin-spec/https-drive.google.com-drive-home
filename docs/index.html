@@ -113,6 +113,15 @@
   .cat-row .bar{height:100%;border-radius:6px}
   .cat-row .amt{font-size:.8rem;color:var(--muted);width:70px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
 
+  .usd-savings-box{background:var(--card);border-radius:var(--radius);padding:14px;margin:0 0 16px}
+  .usd-savings-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .usd-savings-top .label{color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  .usd-savings-top .value{font-size:1.25rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;color:#4ade80}
+  .usd-rate-field{text-align:right}
+  .usd-rate-field label{display:block;font-size:.68rem;color:var(--muted);margin-bottom:3px}
+  .usd-rate-field input{width:120px;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:6px 8px;color:var(--text);font-size:.85rem;text-align:right}
+  .usd-equivalent{margin-top:8px;font-size:.78rem;color:var(--muted)}
+
   ::-webkit-scrollbar{display:none}
 
   .stadium-bg{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
@@ -167,6 +176,20 @@
     </div>
   </div>
 
+  <div class="usd-savings-box" id="usdSavingsBox" style="display:none">
+    <div class="usd-savings-top">
+      <div>
+        <div class="label">🐷 Ahorro en dólares</div>
+        <div class="value" id="usdSavingsTotal">U$S 0,00</div>
+      </div>
+      <div class="usd-rate-field">
+        <label for="usdRateInput">Cotización ($ por U$S)</label>
+        <input type="number" id="usdRateInput" min="0" step="0.01" placeholder="Ej: 1200">
+      </div>
+    </div>
+    <div class="usd-equivalent" id="usdEquivalentText"></div>
+  </div>
+
   <div class="tabs">
     <button class="active" data-tab="add">➕ Agregar</button>
     <button data-tab="history">📋 Historial</button>
@@ -194,6 +217,9 @@
         </div>
 
         <div class="cat-grid" id="catGrid"></div>
+
+        <label class="field-label" id="currencyLabel" style="display:none;font-size:.75rem;color:var(--muted);margin-bottom:6px;font-weight:600">Moneda del ahorro</label>
+        <div class="source-grid" id="currencyGrid" style="display:none"></div>
 
         <label class="field-label" style="display:block;font-size:.75rem;color:var(--muted);margin-bottom:6px;font-weight:600">Método de pago</label>
         <div class="source-grid" id="methodGrid"></div>
@@ -280,9 +306,15 @@
     { id:"transferencia", name:"Transferencia/MP", emoji:"📲", color:"#3b82f6" }
   ];
 
+  const AHORRO_CURRENCIES = [
+    { id:"ars", name:"Pesos",   emoji:"💵" },
+    { id:"usd", name:"Dólares", emoji:"💲" }
+  ];
+
   const EXPENSES_KEY = "expenses_v1";
   const INCOMES_KEY = "incomes_v1";
   const CURRENCY_KEY = "currency_symbol_v1";
+  const USD_RATE_KEY = "usd_rate_v1";
 
   function loadList(key){
     try{
@@ -298,6 +330,7 @@
   let selectedCategory = CATEGORIES[0].id;
   let selectedSource = SOURCES[0].id;
   let selectedMethod = PAYMENT_METHODS[0].id;
+  let selectedCurrency = AHORRO_CURRENCIES[0].id;
   let statsMonthOffset = 0; // 0 = current month
   let editing = null; // { type:'gasto'|'ingreso', id }
 
@@ -308,6 +341,10 @@
   function fmt(n){
     const sign = n < 0 ? "-" : "";
     return sign + currencySymbol + Math.abs(Number(n)).toLocaleString("es", {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function fmtUSD(n){
+    const sign = n < 0 ? "-" : "";
+    return sign + "U$S " + Math.abs(Number(n)).toLocaleString("es", {minimumFractionDigits:2, maximumFractionDigits:2});
   }
   function catById(id){
     return CATEGORIES.find(c => c.id === id) || CATEGORIES[CATEGORIES.length-1];
@@ -334,6 +371,7 @@
       selectedCategory = cat.id;
       catGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
       btn.classList.add("selected");
+      updateAhorroCurrencyUI();
     });
     catGrid.appendChild(btn);
   });
@@ -365,6 +403,32 @@
     });
     methodGrid.appendChild(btn);
   });
+
+  const currencyGrid = document.getElementById("currencyGrid");
+  AHORRO_CURRENCIES.forEach(cur => {
+    const btn = document.createElement("div");
+    btn.className = "cat-btn" + (cur.id === selectedCurrency ? " selected" : "");
+    btn.dataset.currency = cur.id;
+    btn.innerHTML = `<span class="emoji">${cur.emoji}</span><span class="name">${cur.name}</span>`;
+    btn.addEventListener("click", () => {
+      selectedCurrency = cur.id;
+      currencyGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      updateAhorroCurrencyUI();
+    });
+    currencyGrid.appendChild(btn);
+  });
+
+  function updateAhorroCurrencyUI(){
+    const isAhorro = selectedCategory === "ahorro";
+    document.getElementById("currencyLabel").style.display = isAhorro ? "block" : "none";
+    document.getElementById("currencyGrid").style.display = isAhorro ? "grid" : "none";
+    if(!isAhorro) selectedCurrency = "ars";
+    currencyGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.currency === selectedCurrency));
+    document.getElementById("currencySymbolExpense").textContent =
+      (isAhorro && selectedCurrency === "usd") ? "U$S" : currencySymbol;
+  }
+  updateAhorroCurrencyUI();
 
   document.getElementById("dateExpense").value = todayStr();
   document.getElementById("dateIncome").value = todayStr();
@@ -405,6 +469,8 @@
       setMode("gasto");
       selectedCategory = ex.category;
       catGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.cat === ex.category));
+      selectedCurrency = ex.currency === "usd" ? "usd" : "ars";
+      updateAhorroCurrencyUI();
       selectedMethod = ex.method || PAYMENT_METHODS[0].id;
       methodGrid.querySelectorAll(".cat-btn").forEach(b => b.classList.toggle("selected", b.dataset.method === selectedMethod));
       document.getElementById("amountExpense").value = ex.amount;
@@ -444,6 +510,7 @@
     document.getElementById("incomeForm").reset();
     document.getElementById("dateExpense").value = todayStr();
     document.getElementById("dateIncome").value = todayStr();
+    updateAhorroCurrencyUI();
   }
   document.getElementById("cancelExpenseEdit").addEventListener("click", cancelEdit);
   document.getElementById("cancelIncomeEdit").addEventListener("click", cancelEdit);
@@ -456,16 +523,17 @@
     if(!amount || amount <= 0) return;
     const note = document.getElementById("noteExpense").value.trim();
     const date = document.getElementById("dateExpense").value || todayStr();
+    const currency = (selectedCategory === "ahorro" && selectedCurrency === "usd") ? "usd" : "ars";
 
     if(editing && editing.type === "gasto"){
       const ex = expenses.find(e2 => e2.id === editing.id);
-      if(ex){ ex.amount = amount; ex.category = selectedCategory; ex.method = selectedMethod; ex.note = note; ex.date = date; }
+      if(ex){ ex.amount = amount; ex.category = selectedCategory; ex.method = selectedMethod; ex.currency = currency; ex.note = note; ex.date = date; }
       saveExpenses();
       cancelEdit();
     } else {
       expenses.push({
         id: Date.now() + "-" + Math.random().toString(36).slice(2,7),
-        amount, category: selectedCategory, method: selectedMethod, note, date,
+        amount, category: selectedCategory, method: selectedMethod, currency, note, date,
         createdAt: new Date().toISOString()
       });
       saveExpenses();
@@ -510,6 +578,7 @@
     const monthKey = today.slice(0,7);
     let expenseToday = 0, expenseMonth = 0, incomeMonth = 0;
     expenses.forEach(ex => {
+      if(ex.currency === "usd") return; // no se mezcla con los totales en pesos
       if(ex.date === today) expenseToday += ex.amount;
       if(ex.date.slice(0,7) === monthKey) expenseMonth += ex.amount;
     });
@@ -526,6 +595,34 @@
     balanceEl.textContent = fmt(balance);
     balanceEl.classList.toggle("positive", balance >= 0);
     balanceEl.classList.toggle("negative", balance < 0);
+
+    renderUsdSavingsBox();
+  }
+
+  // ---------- Ahorro en dólares ----------
+  const usdRateInput = document.getElementById("usdRateInput");
+  usdRateInput.value = localStorage.getItem(USD_RATE_KEY) || "";
+  usdRateInput.addEventListener("input", () => {
+    localStorage.setItem(USD_RATE_KEY, usdRateInput.value);
+    renderUsdSavingsBox();
+  });
+
+  function renderUsdSavingsBox(){
+    const usdExpenses = expenses.filter(e => e.currency === "usd");
+    const box = document.getElementById("usdSavingsBox");
+    if(usdExpenses.length === 0){
+      box.style.display = "none";
+      return;
+    }
+    box.style.display = "block";
+    const total = usdExpenses.reduce((s,e) => s + e.amount, 0);
+    document.getElementById("usdSavingsTotal").textContent = fmtUSD(total);
+
+    const rate = parseFloat(usdRateInput.value);
+    const equivEl = document.getElementById("usdEquivalentText");
+    equivEl.textContent = (rate > 0)
+      ? `≈ ${fmt(total * rate)} al tipo de cambio cargado ($${rate.toLocaleString("es")} por U$S)`
+      : "Cargá la cotización para ver el equivalente en pesos.";
   }
 
   // ---------- History (expenses + incomes merged) ----------
@@ -551,7 +648,10 @@
 
     Object.keys(monthGroups).forEach(monthKey => {
       const monthItems = monthGroups[monthKey];
-      const monthNet = monthItems.reduce((s,item) => s + (item.kind === "ingreso" ? item.amount : -item.amount), 0);
+      const monthNet = monthItems.reduce((s,item) => {
+        if(item.currency === "usd") return s;
+        return s + (item.kind === "ingreso" ? item.amount : -item.amount);
+      }, 0);
       const monthLabel = new Date(monthKey + "-01T00:00:00").toLocaleDateString("es", { month:"long", year:"numeric" });
 
       const monthSection = document.createElement("div");
@@ -565,7 +665,10 @@
       });
 
       Object.keys(dayGroups).forEach(date => {
-        const dayNet = dayGroups[date].reduce((s,item) => s + (item.kind === "ingreso" ? item.amount : -item.amount), 0);
+        const dayNet = dayGroups[date].reduce((s,item) => {
+          if(item.currency === "usd") return s;
+          return s + (item.kind === "ingreso" ? item.amount : -item.amount);
+        }, 0);
         const dGroup = document.createElement("div");
         dGroup.className = "day-group";
         const dateLabel = new Date(date + "T00:00:00").toLocaleDateString("es", { weekday:"long", day:"numeric", month:"short" });
@@ -574,8 +677,10 @@
         dayGroups[date].forEach(item => {
           const isIncome = item.kind === "ingreso";
           const meta = isIncome ? sourceById(item.source) : catById(item.category);
+          const isUsd = !isIncome && item.currency === "usd";
           const subtitleParts = [];
           if(!isIncome) subtitleParts.push(methodById(item.method).name);
+          if(isUsd) subtitleParts.push("Dólares");
           if(item.note) subtitleParts.push(item.note);
           const subtitle = subtitleParts.map(escapeHtml).join(" · ");
           const row = document.createElement("div");
@@ -586,7 +691,7 @@
               <div class="cat-name">${meta.name}</div>
               ${subtitle ? `<div class="note">${subtitle}</div>` : ""}
             </div>
-            <div class="amt ${isIncome ? "income-amt" : "expense-amt"}">${isIncome ? "+" : "-"}${fmt(item.amount)}</div>
+            <div class="amt ${isIncome ? "income-amt" : "expense-amt"}">${isIncome ? "+" : "-"}${isUsd ? fmtUSD(item.amount) : fmt(item.amount)}</div>
             <div class="actions">
               <button class="icon-btn edit" data-id="${item.id}" data-kind="${item.kind}" aria-label="Editar">✏️</button>
               <button class="icon-btn del" data-id="${item.id}" data-kind="${item.kind}" aria-label="Eliminar">🗑️</button>
@@ -635,8 +740,8 @@
 
   document.getElementById("exportCsvBtn").addEventListener("click", () => {
     const all = [
-      ...expenses.map(e => ({ ...e, kind:"Gasto", categoria: catById(e.category).name, metodo: methodById(e.method).name, signedAmount: -e.amount })),
-      ...incomes.map(i => ({ ...i, kind:"Ingreso", categoria: sourceById(i.source).name, metodo: "", signedAmount: i.amount }))
+      ...expenses.map(e => ({ ...e, kind:"Gasto", categoria: catById(e.category).name, metodo: methodById(e.method).name, moneda: e.currency === "usd" ? "USD" : "ARS", signedAmount: -e.amount })),
+      ...incomes.map(i => ({ ...i, kind:"Ingreso", categoria: sourceById(i.source).name, metodo: "", moneda: "ARS", signedAmount: i.amount }))
     ].sort((a,b) => (a.date + a.createdAt).localeCompare(b.date + b.createdAt));
 
     if(all.length === 0){
@@ -644,9 +749,9 @@
       return;
     }
 
-    const header = ["Fecha","Tipo","Categoría / Fuente","Método de pago","Descripción","Monto"];
+    const header = ["Fecha","Tipo","Categoría / Fuente","Método de pago","Moneda","Descripción","Monto"];
     const rows = all.map(item => [
-      item.date, item.kind, item.categoria, item.metodo, item.note || "", item.signedAmount.toFixed(2)
+      item.date, item.kind, item.categoria, item.metodo, item.moneda, item.note || "", item.signedAmount.toFixed(2)
     ]);
     const csv = [header, ...rows].map(r => r.map(csvEscape).join(",")).join("\r\n");
 
@@ -711,14 +816,14 @@
     document.getElementById("nextMonth").style.opacity = statsMonthOffset >= 0 ? .4 : 1;
 
     const catTotals = {};
-    expenses.filter(e => e.date.slice(0,7) === monthKey).forEach(e => {
+    expenses.filter(e => e.date.slice(0,7) === monthKey && e.currency !== "usd").forEach(e => {
       catTotals[e.category] = (catTotals[e.category] || 0) + e.amount;
     });
     const catItems = CATEGORIES.map(c => ({ ...c, total: catTotals[c.id] || 0 }));
     renderBarList(document.getElementById("catSummary"), catItems, "Sin gastos registrados en este mes.");
 
     const methodTotals = {};
-    expenses.filter(e => e.date.slice(0,7) === monthKey).forEach(e => {
+    expenses.filter(e => e.date.slice(0,7) === monthKey && e.currency !== "usd").forEach(e => {
       const methodId = methodById(e.method).id;
       methodTotals[methodId] = (methodTotals[methodId] || 0) + e.amount;
     });
