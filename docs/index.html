@@ -33,6 +33,7 @@
   .summary .box .value{font-size:1.15rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
   .summary .box .value.positive{color:var(--accent)}
   .summary .box .value.negative{color:var(--danger)}
+  .summary .box .sub{font-size:.68rem;color:var(--muted);margin-top:2px}
 
   .tabs{display:flex;background:var(--card);border-radius:12px;padding:4px;margin-bottom:14px}
   .tabs button{flex:1;padding:8px 4px;border:none;background:transparent;color:var(--muted);border-radius:9px;font-size:.8rem;font-weight:600;cursor:pointer}
@@ -269,6 +270,25 @@
       <button id="prevMonth">‹</button>
       <div class="label" id="statsMonthLabel"></div>
       <button id="nextMonth">›</button>
+    </div>
+    <div class="summary">
+      <div class="box">
+        <div class="label">Ingresos</div>
+        <div class="value" id="statsIncome">$0,00</div>
+      </div>
+      <div class="box">
+        <div class="label">Gastos</div>
+        <div class="value" id="statsExpense">$0,00</div>
+      </div>
+      <div class="box">
+        <div class="label">🐷 Ahorro</div>
+        <div class="value" id="statsSavings">$0,00</div>
+        <div class="sub" id="statsSavingsUsd"></div>
+      </div>
+      <div class="box">
+        <div class="label">Balance</div>
+        <div class="value" id="statsBalance">$0,00</div>
+      </div>
     </div>
     <div class="section-title">Gastos por categoría</div>
     <div class="cat-summary" id="catSummary"></div>
@@ -817,6 +837,22 @@
       monthDate.toLocaleDateString("es", { month:"long", year:"numeric" });
     document.getElementById("nextMonth").disabled = statsMonthOffset >= 0;
     document.getElementById("nextMonth").style.opacity = statsMonthOffset >= 0 ? .4 : 1;
+
+    const monthExpenses = expenses.filter(e => e.date.slice(0,7) === monthKey && e.currency !== "usd");
+    const incomeMonth = incomes.filter(i => i.date.slice(0,7) === monthKey).reduce((s,i) => s + i.amount, 0);
+    const expenseMonth = monthExpenses.filter(e => e.category !== "ahorro").reduce((s,e) => s + e.amount, 0);
+    const savingsPesos = monthExpenses.filter(e => e.category === "ahorro").reduce((s,e) => s + e.amount, 0);
+    const savingsUsd = monthExpenses.filter(e => e.category === "ahorro" && e.usdAmount).reduce((s,e) => s + e.usdAmount, 0);
+    const balanceMonth = incomeMonth - expenseMonth - savingsPesos;
+
+    document.getElementById("statsIncome").textContent = fmt(incomeMonth);
+    document.getElementById("statsExpense").textContent = fmt(expenseMonth);
+    document.getElementById("statsSavings").textContent = fmt(savingsPesos);
+    document.getElementById("statsSavingsUsd").textContent = savingsUsd > 0 ? `≈ ${fmtUSD(savingsUsd)}` : "";
+    const balanceEl = document.getElementById("statsBalance");
+    balanceEl.textContent = fmt(balanceMonth);
+    balanceEl.classList.toggle("positive", balanceMonth >= 0);
+    balanceEl.classList.toggle("negative", balanceMonth < 0);
 
     const catTotals = {};
     expenses.filter(e => e.date.slice(0,7) === monthKey && e.currency !== "usd").forEach(e => {
